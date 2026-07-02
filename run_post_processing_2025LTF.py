@@ -5,27 +5,19 @@ import time
 import argparse
 import pandas as pd
 
-import pandas.io.sql as psql
-
-import pytz
 import numpy as np
 import datetime
 from glob import glob
 import subprocess as sp
 import shutil
-from shutil import copyfile
-import psycopg2
-from psycopg2 import Error
 import typing
 from typing import List
 
 from pathlib import Path
-import yaml
 import uproot
 
-import numpy as np
-from sklearn.cluster import DBSCAN
-from sklearn.preprocessing import StandardScaler
+# from sklearn.cluster import DBSCAN
+# from sklearn.preprocessing import StandardScaler
 
 # Local imports.
 sys.path.append("/data/raid2/eliza4/he6_cres/simulation/he6-cres-spec-sims/src")
