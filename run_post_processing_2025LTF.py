@@ -568,7 +568,7 @@ class PostProcessing:
         print("adding environmental data!")
         # Step 0: Make sure the root_files_df has a tz aware dt column.
         root_files_df["pst_time"] = root_files_df["root_file_path"].apply(
-            lambda x: self.get_pst_time(x)
+            lambda x: self.root_file_to_pst_time(x)
         )
         root_files_df["pst_time"] = root_files_df["pst_time"].dt.tz_localize(
             "US/Pacific"
@@ -595,9 +595,12 @@ class PostProcessing:
 
         return root_files_df
 
-    def get_pst_time(self, root_file_path):
-        # USED in add_env_data()
-        # Makes a naive datetime object from the root file name. Note that the ms padding is very important!
+    def root_file_to_pst_time(self, root_file_path):
+        """
+        Makes a naive datetime object from the root file name. 
+        Note that the ms padding is very important!
+        USED in add_env_data()
+        """
         if self.ms_standard:
             #print("User specified run_ids are all in ms standard.")
             # root file name is in local PST!
