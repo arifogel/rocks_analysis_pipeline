@@ -118,7 +118,7 @@ def sbatch_katydid_file_array(
     run_id = int(file_df["run_id"].iloc[0])
     analysis_id = int(file_df["analysis_id"].iloc[0])
 
-    job_name = f"r{run_id}_a{analysis_id}"
+    job_name = f"r{run_id}_a{analysis_id}_f%a.txt"
     log_name = (
         f"rid_{run_id}_aid_{analysis_id}_fid_%a.txt"
     )
@@ -149,10 +149,10 @@ def sbatch_katydid_file_array(
     if proc is None: 
        return 
 
-    array_jobid = proc.stdout.strip()
-    print(f"Submitted array job ID: {array_jobid}")
-
     if hold_array:
+        array_jobid = proc.stdout.strip()
+        print(f"Submitted array job ID: {array_jobid}")
+
         held_ids_path = Path(
             "/data/raid2/eliza4/he6_cres/katydid_analysis/job_logs/katydid/held_array_jobids.txt"
         )
