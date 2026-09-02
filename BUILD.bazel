@@ -30,7 +30,7 @@ py_library(
         requirement("pyyaml"),
         requirement("scikit-learn"),
         requirement("uproot"),
-    ]) + ["@he6_cres_spec_sims//src/he6_cres_spec_sims"],
+    ]) + ["@he6-cres-spec-sims//src/he6_cres_spec_sims"],
 )
 
 py_binary(
