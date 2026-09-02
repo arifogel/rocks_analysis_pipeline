@@ -259,6 +259,21 @@
         }
       }
     },
+    "@@he6-cres-spec-sims+//tools/uv:uv_extension.bzl%uv_ext": {
+      "general": {
+        "bzlTransitiveDigest": "s+Mm9i2qZZ93a0q2sgRYA4lWV9A6gQotn37ISx3jOLw=",
+        "usagesDigest": "VCi6LILlVk5AxG7/R2wrL6fMMGAsx371JzH28dQQd5w=",
+        "recordedInputs": [],
+        "generatedRepoSpecs": {
+          "uv_bin": {
+            "repoRuleId": "@@he6-cres-spec-sims+//tools/uv:uv_toolchain.bzl%uv_repository",
+            "attributes": {
+              "version": "0.11.21"
+            }
+          }
+        }
+      }
+    },
     "@@pybind11_bazel+//:internal_configure.bzl%internal_configure_extension": {
       "general": {
         "bzlTransitiveDigest": "NRXra7941UfmNUyIxnLt82V5hULluVGL2nBsijTl4j4=",

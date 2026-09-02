@@ -1,9 +1,43 @@
-load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
+load("//tools:deps.bzl", "cdeps", "python_ide_backport")
+load("@pypi//:requirements.bzl", "requirement")
+load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_library")
 
-sh_binary(
-    name = "uv",
-    srcs = ["//tools/uv:uv_wrapper.sh"],
-    args = ["$(location @uv_bin//:uv)"],
-    data = ["@uv_bin//:uv"],
-    visibility = ["//visibility:private"],
+py_binary(
+    name = "sbatch_spec_sims",
+    srcs = [":sbatch_spec_sims.py"],
+    main = ":sbatch_spec_sims.py",
+    deps = cdeps([
+        requirement("argparse"),
+        requirement("awkward-pandas"),
+        requirement("pandas"),
+        requirement("psycopg2-binary"),
+        requirement("pytz"),
+        requirement("pyyaml"),
+        requirement("scikit-learn"),
+        requirement("uproot"),
+    ]),
 )
+
+py_library(
+    name = "rocks_utility_lib",
+    srcs = ["rocks_utility.py"],
+    deps = cdeps([
+        requirement("argparse"),
+        requirement("awkward-pandas"),
+        requirement("pandas"),
+        requirement("psycopg2-binary"),
+        requirement("pytz"),
+        requirement("pyyaml"),
+        requirement("scikit-learn"),
+        requirement("uproot"),
+    ]) + ["@he6_cres_spec_sims//src/he6_cres_spec_sims"],
+)
+
+py_binary(
+    name = "run_spec_sims",
+    srcs = [":run_spec_sims.py"],
+    main = ":run_spec_sims.py",
+    deps = [":rocks_utility_lib"],
+)
+
+python_ide_backport()

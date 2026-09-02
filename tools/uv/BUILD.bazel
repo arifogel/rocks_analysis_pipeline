@@ -1,7 +1,17 @@
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
+
 exports_files(
     [
         "uv_wrapper.sh",
         "uv_extension.bzl",
     ],
     visibility = ["//:__pkg__"],
+)
+
+sh_binary(
+    name = "uv",
+    srcs = [":uv_wrapper.sh"],
+    args = ["$(location @uv_bin//:uv)"],
+    data = ["@uv_bin//:uv"],
+    visibility = ["//visibility:private"],
 )
