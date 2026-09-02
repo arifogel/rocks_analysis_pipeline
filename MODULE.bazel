@@ -1,0 +1,41 @@
+module(
+    name = "rocks-analysis-pipeline",
+    version = "0.1.0",
+)
+
+PYTHON_VERSION = "3.14"
+
+bazel_dep(name = "rules_python", version = "2.3.2")
+
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.toolchain(
+    is_default = True,
+    python_version = PYTHON_VERSION,
+)
+
+bazel_dep(name = "rules_shell", version = "0.8.0")
+bazel_dep(name = "aspect_rules_py", version = "1.12.1")
+
+interpreters = use_extension("@aspect_rules_py//py/unstable:extension.bzl", "python_interpreters")
+interpreters.toolchain(
+    is_default = True,
+    python_version = PYTHON_VERSION,
+)
+use_repo(interpreters, "python_interpreters")
+
+register_toolchains("@python_interpreters//:all")
+
+uv = use_extension("@aspect_rules_py//uv/unstable:extension.bzl", "uv")
+uv.declare_hub(
+    hub_name = "pypi",
+)
+uv.project(
+    hub_name = "pypi",
+    lock = "//:uv.lock",
+    pyproject = "//:pyproject.toml",
+)
+use_repo(uv, "pypi")
+
+uv_ext = use_extension("//tools/uv:uv_extension.bzl", "uv_ext")
+uv_ext.version(version = "0.11.21")
+use_repo(uv_ext, "uv_bin")

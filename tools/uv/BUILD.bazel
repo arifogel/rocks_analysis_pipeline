@@ -1,0 +1,7 @@
+exports_files(
+    [
+        "uv_wrapper.sh",
+        "uv_extension.bzl",
+    ],
+    visibility = ["//:__pkg__"],
+)

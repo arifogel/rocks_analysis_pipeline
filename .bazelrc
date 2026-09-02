@@ -1,0 +1,6 @@
+# Force Bazel to ignore host python and use the toolchain
+build --incompatible_use_python_toolchains=true
+#build --@pypi//venv=dev
+# Fail builds/tests if MODULE.bazel and MODULE.bazel.lock are out of sync
+common --lockfile_mode=error
+
