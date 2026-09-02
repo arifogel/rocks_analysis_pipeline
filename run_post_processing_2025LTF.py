@@ -584,18 +584,23 @@ class PostProcessing:
         root_files_df["utc_time"] = root_files_df["pst_time"].dt.tz_convert("UTC")
 
         # Step 1: Add the monitor rate/field data to each file.
+        print("Adding field data")
         root_files_df = self.add_field(root_files_df)
 
         # Beta monitor not working for Kr DON'T ADD BETA MONITOR!
         # root_files_df["arduino_monitor_rate"] = 1
         
+        print("Adding monitor data")
         root_files_df = self.add_arduino_monitor_rate(root_files_df)
         '''
         if self.count_beta_mon_events_offline:
             root_files_df = self.add_offline_monitor_counts(root_files_df)
         '''
+        print("Adding pressure data")
         root_files_df = self.add_pressures(root_files_df)
+        print("Adding temperature data")
         root_files_df = self.add_temps(root_files_df)
+        print("Adding voltage data")
         root_files_df = self.add_voltage(root_files_df)
 
         # Step 3. Add the set_field by rounding to nearest 100th place.
