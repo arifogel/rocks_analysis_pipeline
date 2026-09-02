@@ -1,0 +1,77 @@
+load("//tools:deps.bzl", "cdeps", "python_ide_backport")
+load("@pypi//:requirements.bzl", "requirement")
+load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_library")
+
+py_binary(
+    name = "sbatch_spec_sims",
+    srcs = [":sbatch_spec_sims.py"],
+    main = ":sbatch_spec_sims.py",
+    deps = cdeps([
+        requirement("argparse"),
+        requirement("awkward-pandas"),
+        requirement("pandas"),
+        requirement("psycopg2-binary"),
+        requirement("pytz"),
+        requirement("pyyaml"),
+        requirement("scikit-learn"),
+        requirement("uproot"),
+    ]),
+)
+
+py_library(
+    name = "rocks_utility_lib",
+    srcs = ["rocks_utility.py"],
+    deps = cdeps([
+        requirement("argparse"),
+        requirement("awkward-pandas"),
+        requirement("pandas"),
+        requirement("psycopg2-binary"),
+        requirement("pytz"),
+        requirement("pyyaml"),
+        requirement("scikit-learn"),
+        requirement("uproot"),
+    ]) + ["@he6-cres-spec-sims//src/he6_cres_spec_sims"],
+)
+
+py_binary(
+    name = "run_spec_sims",
+    srcs = [":run_spec_sims.py"],
+    main = ":run_spec_sims.py",
+    deps = [":rocks_utility_lib"],
+)
+
+py_binary(
+    name = "local_spec_sims",
+    srcs = [
+        ":local_spec_sims.py",
+        ":run_spec_sims.py",
+    ],
+    main = ":local_spec_sims.py",
+    deps = [":rocks_utility_lib"],
+)
+
+py_binary(
+    name = "local_ssa_katydid",
+    srcs = [":local_ssa_katydid.py"],
+    main = ":local_ssa_katydid.py",
+    data = ["@katydid//Source/Executables/Main:Katydid"],
+    deps = [
+        ":rocks_utility_lib",
+        "@rules_python//python/runfiles",
+    ],
+)
+
+py_binary(
+    name = "local_ssa_post_processing",
+    srcs = [
+        ":local_ssa_post_processing.py",
+        ":local_ssa_katydid.py",
+    ],
+    main = ":local_ssa_post_processing.py",
+    deps = [
+        ":rocks_utility_lib",
+        "@rules_python//python/runfiles",
+    ],
+)
+
+python_ide_backport()
