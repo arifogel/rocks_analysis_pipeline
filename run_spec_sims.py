@@ -1,29 +1,20 @@
 #!/usr/bin/env python3
-import os
 import time
 import argparse
-import pandas as pd
-import datetime
-from glob import glob
 
-from shutil import copyfile
-import psycopg2
-from psycopg2 import Error
-import typing
-from typing import List
-import pandas.io.sql as psql
+import os
+import pandas as pd
+
 from pathlib import Path
 import yaml
 import sys
 import subprocess as sp
 import json
 
-# Local imports.
 from rocks_utility import (
     he6cres_db_query,
     get_pst_time,
     set_permissions,
-    check_if_exists,
     log_file_break,
 )
 
@@ -33,8 +24,6 @@ pd.set_option('display.max_rows', 500)
 
 
 # Path to imports
-sys.path.append("/data/raid2/eliza4/he6_cres/simulation/spec_sims_2026/src")
-#sys.path.append("/Users/buzinsky/Builds/spec_sims_SNR/he6-cres-spec-sims/src")
 import he6_cres_spec_sims.experiment as exp
 
 ############################################################################
@@ -45,36 +34,54 @@ def main():
     # Parse command line arguments.
     par = argparse.ArgumentParser()
     arg = par.add_argument
-    arg("-r", "--run_name", type=str, help="labelled run name for MC")
+    arg(
+        "-r",
+        "--run_name",
+        type=str,
+        help="labelled run name for MC",
+        required=True,
+    )
     arg(
         "-nid",
         "--noise_run_id",
         type=int,
         help="run_id to use for noise floor in katydid run. If -1 then will use self as noise file.",
+        required=True,
     )
     arg(
         "-y",
         "--yaml_config",
         type=str,
         help="base .yaml config file, should exist in base config directory.",
+        required=True,
     )
     arg(
         "-j",
         "--json_config",
         type=str,
         help="base .json config file, should exist in base config directory.",
+        required=True,
     )
     arg(
         "-s",
         "--seed",
         type=int,
         help="random seed sent to the Monte Carlo",
+        required=True,
     )
     arg(
         "-sr",
         "--subrun_id",
         type=int,
         help="subrun ID [one unique seed per subrun, everything else identical]",
+        required=True,
+    )
+    arg(
+        "-rb",
+        "--runs_base_dir",
+        type=str,
+        help="Base output directory for runs",
+        required=True,
     )
 
     args = par.parse_args()
@@ -92,12 +99,13 @@ def main():
 
     # Begin running spec-sims
     run_spec_sims = RunSpecSims(
-        args.run_name,
-        args.subrun_id,
-        args.noise_run_id,
-        args.yaml_config,
-        args.json_config,
-        args.seed,
+        run_name=args.run_name,
+        subrun_id=args.subrun_id,
+        noise_run_id=args.noise_run_id,
+        yaml_config=args.yaml_config,
+        json_config=args.json_config,
+        seed=args.seed,
+        runs_base_dir=args.runs_base_dir,
     )
 
     # set_permissions()
@@ -110,7 +118,7 @@ def main():
 
 
 class RunSpecSims:
-    def __init__(self, run_name, subrun_id, noise_run_id, yaml_config, json_config, seed):
+    def __init__(self, *, run_name, subrun_id, noise_run_id, yaml_config, json_config, seed, runs_base_dir: Path):
 
         self.run_name = run_name
         self.subrun_id = subrun_id
@@ -118,6 +126,7 @@ class RunSpecSims:
         self.yaml_config = yaml_config
         self.json_config = json_config
         self.seed = seed
+        self.runs_base_dir = runs_base_dir
 
         self.print_run_summary()
 
@@ -133,23 +142,6 @@ class RunSpecSims:
         print(f"json_config: {self.json_config}\n")
         return None
 
-    def get_base_path(self):
-        ### XXX Change base_path location???
-        #returns path to directory with configs, confirms configs exist
-        base_path = Path("/data/raid2/eliza4/he6_cres/simulation/spec_sims_2026/config_files")
-        #base_path = Path("/Users/buzinsky/Builds/spec_sims_SNR/he6-cres-spec-sims/config_files")
-
-        yaml_config_full = base_path / Path(self.yaml_config)
-        json_config_full = base_path / Path(self.json_config)
-
-        if not yaml_config_full.is_file():
-            raise UserWarning("yaml config doesn't exist")
-
-        if not json_config_full.is_file():
-            raise UserWarning("json config doesn't exist")
-
-        return base_path
-
     # Define a function to aggregate file_path into a list ordered by channel
     def aggregate_paths(self, group):
         ordered_paths = group.sort_values(by='channel')['file_path'].apply(str).tolist()
@@ -159,50 +151,12 @@ class RunSpecSims:
             'file_path': ordered_paths
         })
 
-    def get_noise_fp(self):
-        """
-        Note: just takes the first file in this run_id (assumption is it's a one file acq)
-        """
-        query_he6_db = """
-                        SELECT f.run_id, f.file_path, f.file_in_acq, f.channel
-                        FROM he6cres_runs.spec_files as f
-                        WHERE f.run_id = {}
-                        ORDER BY f.channel
-                        LIMIT 2
-                      """.format(
-            self.noise_run_id
-        )
-
-        noise_file_df = he6cres_db_query(query_he6_db)
-
-        # Group by file_inAcq and apply the aggregation function
-        #make dummy true_field column to use agg function. this is dumb fix later
-        noise_file_df["true_field"] = 0
-        noise_file_df = noise_file_df.groupby('file_in_acq').apply(self.aggregate_paths).reset_index(drop=True)
-
-        noise_file_path = noise_file_df["file_path"].iloc[0]
-        print(f"Noise path: {noise_file_path}")
-
-        #Convert to directory structure on wulf
-        wulf_noise_paths = [Path("/data/raid2/eliza4/he6_cres/") / Path(old).relative_to("/mnt") for old in noise_file_path]
-        #wulf_noise_paths = [Path("/Users/buzinsky/Builds/DAQ/He6DAQ/pyqt5_GUI/temp/") / Path(old).name for old in noise_file_path]
-        print(wulf_noise_paths)
-
-        for noise_file in wulf_noise_paths:
-            if not noise_file.is_file():
-                raise UserWarning(f"{noise_file} doesn't exist")
-
-        str_wulf_noise_paths = [str(wnp) for wnp in wulf_noise_paths]
-
-        return str_wulf_noise_paths
-
     def run(self):
         # Force a write to the log.
         sys.stdout.flush()
 
-        base_path = self.get_base_path()
-        yaml_config_full = base_path / Path(self.yaml_config)
-        json_config_full = base_path / Path(self.json_config)
+        yaml_config_full = self.yaml_config
+        json_config_full = self.json_config
 
         #Load the yaml configuration file
         with open(yaml_config_full, "r") as f:
@@ -233,10 +187,7 @@ class RunSpecSims:
 
 
         #define where the MC results are going to be written to
-        base_run_dir = Path("/data/raid2/eliza4/he6_cres/simulation/sim_results/runs")
-        #base_run_dir = Path("/Users/buzinsky/Builds/spec_sims_SNR/he6-cres-spec-sims/config_files/tmp")
-
-        base_experiment_dir = base_run_dir / Path(self.run_name)
+        base_experiment_dir = self.runs_base_dir / Path(self.run_name)
         print(base_experiment_dir)
 
         ## Make the base_run_dir if it doesn't exist
@@ -246,9 +197,6 @@ class RunSpecSims:
 
         run_params["output_path"] = base_experiment_dir / Path(f"subrun_{self.subrun_id}")
         print(run_params["output_path"])
-
-        if yaml_dict["Settings"]["sim_daq"] == True:
-            yaml_dict["DAQ"]["noise_paths"] = self.get_noise_fp()
 
         print(yaml_dict)
 
@@ -268,4 +216,20 @@ class RunSpecSims:
         return None
 
 if __name__ == "__main__":
-    main()
+    if os.environ.get("HE6_PROFILE"):
+        import cProfile
+        import pstats
+
+        profiler = cProfile.Profile()
+        profiler.enable()
+        try:
+                main()
+        finally:
+            profiler.disable()
+            out_path = os.environ.get("HE6_PROFILE_OUT", "profile.out")
+            stats = pstats.Stats(profiler).sort_stats("cumulative")
+            stats.dump_stats(out_path)
+            print(f"\n=== Top 40 by cumulative time (also written to {out_path}) ===")
+            stats.print_stats(40)
+    else:
+        main()
