@@ -40,4 +40,14 @@ py_binary(
     deps = [":rocks_utility_lib"],
 )
 
+py_binary(
+    name = "local_spec_sims",
+    srcs = [
+        ":local_spec_sims.py",
+        ":run_spec_sims.py",
+    ],
+    main = ":local_spec_sims.py",
+    deps = cdeps([requirement("numpy")]) + [":rocks_utility_lib"],
+)
+
 python_ide_backport()
