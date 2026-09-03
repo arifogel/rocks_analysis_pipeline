@@ -32,6 +32,28 @@ Python version note: this file is written to be compatible with Python 3.9
 (e.g. `typing.Optional[int]` instead of the 3.10+ `int | None` syntax),
 even though the rest of this project currently targets a newer version.
 """
+import os
+
+# This must run before numpy/scipy are imported anywhere in this process
+# (below, and transitively via he6_cres_spec_sims once RunSpecSims is
+# imported) -- otherwise the underlying BLAS/OpenMP library has already
+# latched onto its default thread count. Without this, each worker process
+# spawned by ProcessPoolExecutor below would *also* try to use every
+# logical core for its own numpy/scipy calls, so N worker processes x N
+# BLAS threads each massively oversubscribes an N-core machine: every core
+# shows 100% busy, but almost all of it is contention/context-switching
+# rather than real work. Using setdefault() rather than a plain assignment
+# so an explicit value the user has already set in their environment is
+# left alone.
+for _thread_env_var in (
+        "OMP_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+        "VECLIB_MAXIMUM_THREADS",
+):
+    os.environ.setdefault(_thread_env_var, "1")
+
 import argparse
 import json
 import subprocess as sp
