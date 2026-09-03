@@ -2,12 +2,21 @@
 """
 Local, parallel driver for spec-sims subruns.
 
-Explodes a (yaml_config, json_config) pair describing N fields into
-num_subruns * N independent (subrun, field) jobs -- one field each -- and
-runs all of them across a single flat process pool, entirely within one
-`bazel run` invocation. Each job calls RunSpecSims.run() completely
-unmodified (the same class the single-field bazel target already uses), so
-a given (subrun, field)'s output is identical to running it individually.
+For each subrun, generates all of its per-field configs via
+RunSpecSims.run(generate_configs_only=True) -- exactly the same call path
+the single-process code already uses, just stopped before it also runs
+each field sequentially -- so config generation and discovery for a subrun
+always happen as a single, uninterrupted unit, with correct sequential
+field indices. Only *after* a subrun's configs are generated does the
+driver fan the resulting per-field config paths out across a flat process
+pool, each calling he6_cres_spec_sims.simulation.Simulation(config_path)
+.run_full() directly -- the same call Experiment.run_sims()'s own
+per-field loop makes -- entirely within one `bazel run` invocation.
+
+generate_configs_only is an explicit, default-False parameter added to
+RunSpecSims.run()/Experiment.__init__ for exactly this purpose (see
+run_spec_sims.py / he6-cres-spec-sims's experiment.py). It does not change
+behavior for any existing caller.
 
 Each job's full log is written into the same directory RunSpecSims/DAQ
 already create for that (subrun, field) today:
@@ -55,17 +64,13 @@ for _thread_env_var in (
     os.environ.setdefault(_thread_env_var, "1")
 
 import argparse
-import json
-import subprocess as sp
 import sys
 import traceback
 from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, List, Optional
 
-import numpy as np
-
-from rocks_utility import get_pst_time, log_file_break, set_permissions
+import he6_cres_spec_sims.simulation as he6_simulation
 from run_spec_sims import RunSpecSims
 
 
@@ -97,10 +102,7 @@ def parse_args() -> argparse.Namespace:
         "--json_config",
         type=str,
         required=True,
-        help=(
-            "base .json spec-sims config file to be run. Its fields_T/"
-            "traps_A are exploded into one single-field job each."
-        ),
+        help="base .json spec-sims config file to be run",
     )
     arg(
         "-n",
@@ -140,76 +142,39 @@ def parse_args() -> argparse.Namespace:
     return par.parse_args()
 
 
-def load_base_json_config(json_config_path: str) -> dict[str, Any]:
-    """Loads the base json_config file once, returning the parsed dict."""
-    with open(json_config_path, "r") as f:
-        return json.load(f)
-
-
-def field_dir_name(field_value: float) -> str:
-    """Reproduces the exact directory-name convention that
-    Experiment.create_configs_for_experiment() / Results.save() use for a
-    single-field config, so the driver can predict a (subrun, field) job's
-    output directory before running it.
-
-    A single-field job's fields_T list always has length 1, so it always
-    gets index 0 within Experiment's own enumeration -- hence the fixed
-    "0_field_..." prefix here, regardless of the field's original position
-    in the un-exploded fields_T list.
+def build_jobs(args: argparse.Namespace) -> List[dict[str, Any]]:
+    """Generates every subrun's configs (sequentially, one subrun at a
+    time -- see module docstring) and builds one job per resulting
+    (subrun, field) config path.
     """
-    rounded_field: np.float64 = np.around(field_value, 6)
-    return "0_field_{}T".format(rounded_field)
-
-
-def build_jobs(
-    args: argparse.Namespace, run_dir: Path, base_json: dict[str, Any]
-) -> list[dict[str, Any]]:
-    """Builds one job per (subrun_id, field_index), by slicing the base
-    json_config's fields_T/traps_A down to a single field each.
-
-    rand_seeds is not sliced here since RunSpecSims.run() overwrites it
-    unconditionally, based on the per-subrun seed and the (sliced) length of
-    fields_T -- so it doesn't matter what's in the base json_config.
-    """
-    fields_t: list[float] = base_json["fields_T"]
-    traps_a: list[float] = base_json["traps_A"]
-    if len(fields_t) != len(traps_a):
-        raise ValueError(
-            f"fields_T (len={len(fields_t)}) and traps_A (len={len(traps_a)}) "
-            "must be the same length in the json_config."
-        )
-
     seeds: list[int] = list(
         range(args.initial_seed, args.initial_seed + args.num_subruns)
     )
 
     jobs: list[dict[str, Any]] = []
     for subrun_id in range(args.num_subruns):
-        subrun_dir: Path = run_dir / f"subrun_{subrun_id}"
-        job_config_dir: Path = subrun_dir / "_driver_job_configs"
+        config_paths: List[Path] = RunSpecSims(
+            run_name=args.run_name,
+            subrun_id=subrun_id,
+            noise_run_id=args.noise_run_id,
+            yaml_config=args.yaml_config,
+            json_config=args.json_config,
+            seed=seeds[subrun_id],
+            runs_base_dir=args.runs_base_dir,
+        ).run(generate_configs_only=True)
 
-        for field_index, (field_value, trap_value) in enumerate(
-            zip(fields_t, traps_a)
-        ):
-            per_field_json: dict[str, Any] = dict(base_json)
-            per_field_json["fields_T"] = [field_value]
-            per_field_json["traps_A"] = [trap_value]
-
-            job_config_path: Path = job_config_dir / f"field_{field_index:02d}.json"
-            output_dir: Path = subrun_dir / field_dir_name(field_value)
+        for field_index, config_path in enumerate(config_paths):
+            # Matches Results.get_path_name()'s own computation exactly,
+            # since config_path is a real path RunSpecSims/Experiment just
+            # generated (not a predicted/guessed one).
+            output_dir: Path = config_path.parent / config_path.stem
             log_path: Path = output_dir / "local_spec_sims.log"
 
             jobs.append(
                 {
-                    "run_name": args.run_name,
                     "subrun_id": subrun_id,
                     "field_index": field_index,
-                    "noise_run_id": args.noise_run_id,
-                    "yaml_config": args.yaml_config,
-                    "json_config_path": job_config_path,
-                    "json_config_contents": per_field_json,
-                    "seed": seeds[subrun_id],
-                    "runs_base_dir": args.runs_base_dir,
+                    "config_path": config_path,
                     "output_dir": output_dir,
                     "log_path": log_path,
                 }
@@ -221,54 +186,39 @@ def _run_one_job(params: dict[str, Any]) -> None:
     """Runs a single (subrun, field) job in this worker process.
 
     This is a top-level function (not a closure) so it can be pickled and
-    sent to a spawned worker process. Writes this job's single-field
-    json_config to disk, then calls RunSpecSims.run() completely
-    unmodified -- the same call a single-field bazel run would make -- with
-    stdout/stderr redirected into the job's natural output directory (see
-    field_dir_name()) so parallel jobs don't interleave in the terminal.
+    sent to a spawned worker process. Calls Simulation(config_path).run_full()
+    directly -- the same call Experiment.run_sims()'s own per-field loop
+    makes -- with stdout/stderr redirected into the job's natural output
+    directory so parallel jobs don't interleave in the terminal.
     """
     output_dir: Path = params["output_dir"]
     log_path: Path = params["log_path"]
-    job_config_path: Path = params["json_config_path"]
-
-    job_config_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(job_config_path, "w") as config_file:
-        json.dump(params["json_config_contents"], config_file)
+    config_path: Path = params["config_path"]
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    with open(log_path, "w") as log_file:
+    # buffering=1 (line-buffered): without this, writes to a redirected
+    # sys.stdout are fully block-buffered rather than line-buffered, so a
+    # log file tailed while the job is still running can appear to lag far
+    # behind (or show nothing at all) even though the job is progressing
+    # normally -- everything gets flushed eventually, but only once the
+    # internal buffer fills or the file is closed.
+    with open(log_path, "w", buffering=1) as log_file:
         sys.stdout = log_file
         sys.stderr = log_file
         try:
-            sp.run(["umask u=rwx,g=rwx,o=rx"], executable="/bin/bash", shell=True)
-
-            print(f"\nRunning spec-sims. STARTING at PST time: {get_pst_time()}\n")
+            print("+++++++++++++++++++++++++++++++++++++++++++++++++\n\n")
             print(
-                f"\nProcessing: subrun_id: {params['subrun_id']}, "
-                f"field_index: {params['field_index']}.\n"
+                f"Running subrun {params['subrun_id']} field "
+                f"{params['field_index']} ({config_path})\n\n"
             )
-            sys.stdout.flush()
+            print("+++++++++++++++++++++++++++++++++++++++++++++++++")
 
-            set_permissions()
-
-            run_spec_sims = RunSpecSims(
-                run_name=params["run_name"],
-                subrun_id=params["subrun_id"],
-                noise_run_id=params["noise_run_id"],
-                yaml_config=params["yaml_config"],
-                json_config=str(job_config_path),
-                seed=params["seed"],
-                runs_base_dir=params["runs_base_dir"],
-            )
+            simulation = he6_simulation.Simulation(config_path)
+            simulation.run_full()
 
             print(
-                f"\nRunning spec-sims on {params['run_name']} "
-                f"{params['subrun_id']} field {params['field_index']} "
-                f"DONE at PST time: {get_pst_time()}\n"
+                f"\nsubrun {params['subrun_id']} field {params['field_index']} DONE\n"
             )
-            run_spec_sims.run()
-
-            log_file_break()
         except Exception:
             traceback.print_exc()
             raise
@@ -278,26 +228,18 @@ def main() -> None:
     args: argparse.Namespace = parse_args()
 
     run_dir: Path = Path(args.runs_base_dir) / args.run_name
-    base_json: dict[str, Any] = load_base_json_config(args.json_config)
+    run_dir.mkdir(parents=True, exist_ok=True)
 
-    jobs: list[dict[str, Any]] = build_jobs(args, run_dir, base_json)
+    jobs: List[dict[str, Any]] = build_jobs(args)
 
     if args.dry_run:
-        print(f"[dry_run] Would create: {run_dir}")
         for job in jobs:
             print(
                 f"[dry_run] subrun {job['subrun_id']} field {job['field_index']}: "
-                f"seed={job['seed']} output_dir={job['output_dir']}"
+                f"config={job['config_path']} output_dir={job['output_dir']}"
             )
         return
 
-    # Pre-create shared/output directories once, up front, before spawning
-    # any workers. he6-cres-spec-sims's own directory creation is now
-    # idempotent (mkdir(parents=True, exist_ok=True)) rather than racily
-    # check-then-creating or destructively deleting an existing directory,
-    # but there's no reason to lean on that alone when the driver can just
-    # as easily ensure these exist before any worker starts.
-    run_dir.mkdir(parents=True, exist_ok=True)
     for job in jobs:
         job["output_dir"].mkdir(parents=True, exist_ok=True)
 

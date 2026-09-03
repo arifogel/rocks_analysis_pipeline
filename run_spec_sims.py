@@ -151,7 +151,7 @@ class RunSpecSims:
             'file_path': ordered_paths
         })
 
-    def run(self):
+    def run(self, generate_configs_only: bool = False):
         # Force a write to the log.
         sys.stdout.flush()
 
@@ -191,9 +191,8 @@ class RunSpecSims:
         print(base_experiment_dir)
 
         ## Make the base_run_dir if it doesn't exist
-        if not base_experiment_dir.is_dir():
-            base_experiment_dir.mkdir()
-            print("Created directory: {} ".format(base_experiment_dir))
+        base_experiment_dir.mkdir(parents=True, exist_ok=True)
+        print("Created directory: {} ".format(base_experiment_dir))
 
         run_params["output_path"] = base_experiment_dir / Path(f"subrun_{self.subrun_id}")
         print(run_params["output_path"])
@@ -207,13 +206,15 @@ class RunSpecSims:
             print("{}: {}".format(key, val))
 
         #exp.Experiment(run_params)
-        exp.Experiment(run_params,yaml_dict)
+        experiment = exp.Experiment(
+            run_params, yaml_dict, generate_configs_only=generate_configs_only
+        )
         #############################################################
         t_stop = time.process_time()
         elapsed = t_stop - t_start
         print(elapsed)
 
-        return None
+        return experiment.config_paths
 
 if __name__ == "__main__":
     if os.environ.get("HE6_PROFILE"):
