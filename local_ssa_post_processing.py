@@ -46,13 +46,13 @@ Python version note: written for Python 3.9 compatibility, matching
 local_spec_sims.py / local_ssa_katydid.py, for the same reason (the CENPA
 venv this may eventually also run in).
 """
+
 import argparse
 import sys
 import traceback
 from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 from glob import glob
 from pathlib import Path
-from typing import Any, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -153,29 +153,23 @@ def build_tracks_for_one_root_file(row: dict) -> pd.DataFrame:
     return tracks_df.reset_index(drop=True)
 
 
-def build_tracks_csv(file_df: pd.DataFrame, max_jobs: Optional[int]) -> pd.DataFrame:
+def build_tracks_csv(file_df: pd.DataFrame, max_jobs: int | None) -> pd.DataFrame:
     """Reads every existing .root file's tracks in parallel (safe: each
     resulting DataFrame is self-identifying via explicit columns, so
     concatenation order -- which as_completed() does not guarantee --
     doesn't matter). Missing .root files are skipped, matching the original
     script's root_file_exists filter.
     """
-    rows = [
-        row
-        for row in file_df.to_dict("records")
-        if Path(row["root_file_path"]).is_file()
-    ]
+    rows = [row for row in file_df.to_dict("records") if Path(row["root_file_path"]).is_file()]
     n_missing = len(file_df) - len(rows)
     if n_missing:
         print(f"{n_missing} of {len(file_df)} expected .root file(s) do not exist yet; skipping them.")
     if not rows:
         return pd.DataFrame()
 
-    dfs: List[pd.DataFrame] = []
+    dfs: list[pd.DataFrame] = []
     with ProcessPoolExecutor(max_workers=max_jobs) as pool:
-        futures: dict[Future, dict] = {
-            pool.submit(build_tracks_for_one_root_file, row): row for row in rows
-        }
+        futures: dict[Future, dict] = {pool.submit(build_tracks_for_one_root_file, row): row for row in rows}
         for future in as_completed(futures):
             row = futures[future]
             try:
@@ -189,7 +183,7 @@ def build_tracks_csv(file_df: pd.DataFrame, max_jobs: Optional[int]) -> pd.DataF
     return pd.concat(dfs, axis=0).reset_index(drop=True)
 
 
-def find_mc_truth_csvs(runs_base_dir: str, run_name: str, filename: str) -> List[str]:
+def find_mc_truth_csvs(runs_base_dir: str, run_name: str, filename: str) -> list[str]:
     """Matches Results.save()'s own path computation (config_path.parent /
     config_path.stem), which is identical to local_spec_sims.py's own
     per-(subrun, field) output_dir -- so this glob finds exactly what that
@@ -199,13 +193,13 @@ def find_mc_truth_csvs(runs_base_dir: str, run_name: str, filename: str) -> List
     return glob(pattern)
 
 
-def build_mc_truth_csv(csv_paths: List[str]) -> pd.DataFrame:
+def build_mc_truth_csv(csv_paths: list[str]) -> pd.DataFrame:
     """Reused, near-verbatim, from run_ssa_post_processing.py's
     write_mc_truth_csvs: same "root_file_path" column name for the *source
     csv's own path* (not a katydid .root file -- matching the original
     script's column semantics exactly, for drop-in compatibility with
     anything already relying on that name)."""
-    dfs: List[pd.DataFrame] = []
+    dfs: list[pd.DataFrame] = []
     for csv_path in csv_paths:
         df = pd.read_csv(csv_path)
         df["root_file_path"] = csv_path
@@ -247,7 +241,9 @@ def main() -> None:
 
     tracks_df = build_tracks_csv(file_df, args.max_jobs)
     tracks_df.to_csv(output_dir / "tracks.csv")
-    print(f"Wrote tracks.csv ({len(tracks_df)} row(s), from {tracks_df['root_file_path'].nunique() if not tracks_df.empty else 0} .root file(s)).")
+    print(
+        f"Wrote tracks.csv ({len(tracks_df)} row(s), from {tracks_df['root_file_path'].nunique() if not tracks_df.empty else 0} .root file(s))."
+    )
 
     bands_df = build_mc_truth_csv(bands_csv_paths)
     bands_df.to_csv(output_dir / "bands.csv")

@@ -17,11 +17,10 @@ bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "aspect_rules_py", version = "1.12.1")
 bazel_dep(name = "he6-cres-spec-sims", version = "0.1.0")
 bazel_dep(name = "katydid", version = "0.1.0")
-
 git_override(
     module_name = "katydid",
-    remote = "https://github.com/arifogel/katydid.git",
     branch = "main",
+    remote = "https://github.com/arifogel/katydid.git",
 )
 
 interpreters = use_extension("@aspect_rules_py//py/unstable:extension.bzl", "python_interpreters")

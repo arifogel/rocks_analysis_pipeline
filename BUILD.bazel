@@ -1,6 +1,6 @@
-load("//tools:deps.bzl", "cdeps", "python_ide_backport")
-load("@pypi//:requirements.bzl", "requirement")
 load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_library")
+load("@pypi//:requirements.bzl", "requirement")
+load("//tools:deps.bzl", "cdeps", "python_ide_backport")
 
 py_binary(
     name = "sbatch_spec_sims",
@@ -53,8 +53,8 @@ py_binary(
 py_binary(
     name = "local_ssa_katydid",
     srcs = [":local_ssa_katydid.py"],
-    main = ":local_ssa_katydid.py",
     data = ["@katydid//Source/Executables/Main:Katydid"],
+    main = ":local_ssa_katydid.py",
     deps = [
         ":rocks_utility_lib",
         "@rules_python//python/runfiles",
@@ -64,8 +64,8 @@ py_binary(
 py_binary(
     name = "local_ssa_post_processing",
     srcs = [
-        ":local_ssa_post_processing.py",
         ":local_ssa_katydid.py",
+        ":local_ssa_post_processing.py",
     ],
     main = ":local_ssa_post_processing.py",
     deps = [

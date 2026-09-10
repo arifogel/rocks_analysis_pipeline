@@ -41,6 +41,7 @@ Python version note: this file is written to be compatible with Python 3.9
 (e.g. `typing.Optional[int]` instead of the 3.10+ `int | None` syntax),
 even though the rest of this project currently targets a newer version.
 """
+
 import os
 
 # This must run before numpy/scipy are imported anywhere in this process
@@ -55,23 +56,24 @@ import os
 # so an explicit value the user has already set in their environment is
 # left alone.
 for _thread_env_var in (
-        "OMP_NUM_THREADS",
-        "OPENBLAS_NUM_THREADS",
-        "MKL_NUM_THREADS",
-        "NUMEXPR_NUM_THREADS",
-        "VECLIB_MAXIMUM_THREADS",
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
 ):
     os.environ.setdefault(_thread_env_var, "1")
 
-import argparse
-import sys
-import traceback
-from concurrent.futures import Future, ProcessPoolExecutor, as_completed
-from pathlib import Path
-from typing import Any, List, Optional
+import argparse  # noqa: E402
+import sys  # noqa: E402
+import traceback  # noqa: E402
+from concurrent.futures import Future, ProcessPoolExecutor, as_completed  # noqa: E402
+from pathlib import Path  # noqa: E402
+from typing import Any  # noqa: E402
 
-import he6_cres_spec_sims.simulation as he6_simulation
-from run_spec_sims import RunSpecSims
+import he6_cres_spec_sims.simulation as he6_simulation  # noqa: E402
+
+from run_spec_sims import RunSpecSims  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -142,18 +144,16 @@ def parse_args() -> argparse.Namespace:
     return par.parse_args()
 
 
-def build_jobs(args: argparse.Namespace) -> List[dict[str, Any]]:
+def build_jobs(args: argparse.Namespace) -> list[dict[str, Any]]:
     """Generates every subrun's configs (sequentially, one subrun at a
     time -- see module docstring) and builds one job per resulting
     (subrun, field) config path.
     """
-    seeds: list[int] = list(
-        range(args.initial_seed, args.initial_seed + args.num_subruns)
-    )
+    seeds: list[int] = list(range(args.initial_seed, args.initial_seed + args.num_subruns))
 
     jobs: list[dict[str, Any]] = []
     for subrun_id in range(args.num_subruns):
-        config_paths: List[Path] = RunSpecSims(
+        config_paths: list[Path] = RunSpecSims(
             run_name=args.run_name,
             subrun_id=subrun_id,
             noise_run_id=args.noise_run_id,
@@ -207,18 +207,13 @@ def _run_one_job(params: dict[str, Any]) -> None:
         sys.stderr = log_file
         try:
             print("+++++++++++++++++++++++++++++++++++++++++++++++++\n\n")
-            print(
-                f"Running subrun {params['subrun_id']} field "
-                f"{params['field_index']} ({config_path})\n\n"
-            )
+            print(f"Running subrun {params['subrun_id']} field {params['field_index']} ({config_path})\n\n")
             print("+++++++++++++++++++++++++++++++++++++++++++++++++")
 
             simulation = he6_simulation.Simulation(config_path)
             simulation.run_full()
 
-            print(
-                f"\nsubrun {params['subrun_id']} field {params['field_index']} DONE\n"
-            )
+            print(f"\nsubrun {params['subrun_id']} field {params['field_index']} DONE\n")
         except Exception:
             traceback.print_exc()
             raise
@@ -230,7 +225,7 @@ def main() -> None:
     run_dir: Path = Path(args.runs_base_dir) / args.run_name
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    jobs: List[dict[str, Any]] = build_jobs(args)
+    jobs: list[dict[str, Any]] = build_jobs(args)
 
     if args.dry_run:
         for job in jobs:
@@ -243,14 +238,12 @@ def main() -> None:
     for job in jobs:
         job["output_dir"].mkdir(parents=True, exist_ok=True)
 
-    max_jobs: Optional[int] = args.max_jobs
+    max_jobs: int | None = args.max_jobs
     print(f"Running {len(jobs)} job(s) with max_jobs={max_jobs or '(cpu count)'}")
 
     failures: list[str] = []
     with ProcessPoolExecutor(max_workers=max_jobs) as pool:
-        futures: dict[Future, dict[str, Any]] = {
-            pool.submit(_run_one_job, job): job for job in jobs
-        }
+        futures: dict[Future, dict[str, Any]] = {pool.submit(_run_one_job, job): job for job in jobs}
         for future in as_completed(futures):
             job = futures[future]
             job_label: str = f"subrun {job['subrun_id']} field {job['field_index']}"

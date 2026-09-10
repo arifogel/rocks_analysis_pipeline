@@ -42,22 +42,21 @@ for the same reason as local_spec_sims.py -- the CENPA venv this may
 eventually also run in is 3.9, even though this repo's Bazel build
 currently targets a newer version.
 """
+
 import argparse
 import re
 import subprocess as sp
 import sys
 import traceback
-from concurrent.futures import Future, ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from glob import glob
 from pathlib import Path
-from typing import Any, List, Optional
 
+import he6_cres_spec_sims.spec_tools.spec_calc.spec_calc as sc
 import numpy as np
 import pandas as pd
 import yaml
 from python.runfiles import runfiles
-
-import he6_cres_spec_sims.spec_tools.spec_calc.spec_calc as sc
 
 KATYDID_RLOCATION = "katydid+/Source/Executables/Main/Katydid"
 
@@ -165,9 +164,7 @@ def build_slew_root_filename(row: pd.Series, output_dir: str, footer: str) -> st
     return root_path
 
 
-def build_file_df_for_subrun(
-    run_name: str, runs_base_dir: str, subrun_id: int, output_dir: str
-) -> pd.DataFrame:
+def build_file_df_for_subrun(run_name: str, runs_base_dir: str, subrun_id: int, output_dir: str) -> pd.DataFrame:
     """Reused, near-verbatim, from run_ssa_katydid.py's create_base_file_df,
     plus a new field_index column (parsed from the per-field directory name,
     e.g. "3_field_1.92223T" -> 3) that the original never surfaced.
@@ -178,10 +175,10 @@ def build_file_df_for_subrun(
         return pd.DataFrame()
 
     speck_file_paths = [Path(s) for s in speck_files]
-    acqs: List[int] = []
-    channels: List[int] = []
-    field_indices: List[int] = []
-    yaml_files: List[str] = []
+    acqs: list[int] = []
+    channels: list[int] = []
+    field_indices: list[int] = []
+    yaml_files: list[str] = []
     for p in speck_file_paths:
         m = SPECK_FILENAME_RE.search(p.name)
         acqs.append(int(m.group(1)))
@@ -210,7 +207,7 @@ def build_file_df_for_subrun(
     true_fields: dict = {}
     trap_currents: dict = {}
     for yaml_config in set(yaml_files):
-        with open(yaml_config, "r") as f:
+        with open(yaml_config) as f:
             spec_sim_config_dict = yaml.load(f, Loader=yaml.FullLoader)
         seeds[yaml_config] = spec_sim_config_dict["Settings"]["rand_seed"]
         true_fields[yaml_config] = spec_sim_config_dict["EventBuilder"]["main_field"]
@@ -222,9 +219,7 @@ def build_file_df_for_subrun(
     file_df["run_name"] = run_name
     file_df["approx_slope"] = get_slope(file_df["true_field"])
 
-    file_df["root_file_path"] = file_df.apply(
-        lambda row: build_slew_root_filename(row, output_dir, ".root"), axis=1
-    )
+    file_df["root_file_path"] = file_df.apply(lambda row: build_slew_root_filename(row, output_dir, ".root"), axis=1)
     file_df["slew_file_path"] = file_df.apply(
         lambda row: build_slew_root_filename(row, output_dir, "_SlewTimes.txt"), axis=1
     )
@@ -255,7 +250,7 @@ def apply_dry_run_filters(file_df: pd.DataFrame, args: argparse.Namespace) -> pd
     return filtered
 
 
-def build_katydid_command(row: pd.Series, katydid_path: str, katydid_config: str, noise_paths: List[str]) -> List[str]:
+def build_katydid_command(row: pd.Series, katydid_path: str, katydid_config: str, noise_paths: list[str]) -> list[str]:
     """Reused verbatim from run_ssa_katydid.py's run_katydid, aside from
     where the executable path, config path, and noise paths come from."""
     katydid_command_list = [katydid_path, "-c", katydid_config]
@@ -302,10 +297,10 @@ def _run_one_job(params: dict) -> None:
     """Runs every row assigned to this job, sequentially, in this worker
     process. This is a top-level function (not a closure) so it can be
     pickled and sent to a spawned worker process."""
-    rows: List[dict] = params["rows"]
+    rows: list[dict] = params["rows"]
     katydid_path: str = params["katydid_path"]
     katydid_config: str = params["katydid_config"]
-    noise_paths: List[str] = params["noise_paths"]
+    noise_paths: list[str] = params["noise_paths"]
 
     for row in rows:
         output_dir = Path(row["root_file_path"]).parent
@@ -334,14 +329,14 @@ def _run_one_job(params: dict) -> None:
                 print("katydid stderr (tail 1k):", err[-1000:])
 
 
-def build_jobs(file_df: pd.DataFrame, args: argparse.Namespace) -> List[dict]:
+def build_jobs(file_df: pd.DataFrame, args: argparse.Namespace) -> list[dict]:
     group_keys = ["subrun_id"]
     if args.parallelize_fields:
         group_keys.append("field_index")
     if args.parallelize_acquisitions:
         group_keys.append("acquisition")
 
-    jobs: List[dict] = []
+    jobs: list[dict] = []
     for _, group in file_df.groupby(group_keys, sort=False):
         jobs.append({"rows": group.to_dict("records")})
     return jobs
@@ -367,8 +362,7 @@ def main() -> None:
         for _, row in filtered.iterrows():
             command = build_katydid_command(row, katydid_path, args.katydid_config, args.noise_paths)
             print(
-                f"[dry_run] subrun={row['subrun_id']} field_index={row['field_index']} "
-                f"acquisition={row['acquisition']}"
+                f"[dry_run] subrun={row['subrun_id']} field_index={row['field_index']} acquisition={row['acquisition']}"
             )
             print(command)
         return
@@ -380,10 +374,12 @@ def main() -> None:
         job["katydid_config"] = args.katydid_config
         job["noise_paths"] = args.noise_paths
 
-    print(f"Running {len(jobs)} job(s) ({len(file_df)} total katydid invocations) "
-          f"with max_jobs={args.max_jobs or '(cpu count)'}")
+    print(
+        f"Running {len(jobs)} job(s) ({len(file_df)} total katydid invocations) "
+        f"with max_jobs={args.max_jobs or '(cpu count)'}"
+    )
 
-    failures: List[int] = []
+    failures: list[int] = []
     with ProcessPoolExecutor(max_workers=args.max_jobs) as pool:
         futures = {pool.submit(_run_one_job, job): i for i, job in enumerate(jobs)}
         for future in as_completed(futures):
