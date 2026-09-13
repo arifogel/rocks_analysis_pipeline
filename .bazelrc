@@ -1,0 +1,10 @@
+# Force Bazel to ignore host python and use the toolchain
+build --incompatible_use_python_toolchains=true
+#build --@pypi//venv=dev
+# Fail builds/tests if MODULE.bazel and MODULE.bazel.lock are out of sync
+common --lockfile_mode=error
+try-import %workspace%/.bazelrc.user
+
+### Add to .bazelrc.user if using local checkout
+#common --override_module=he6-cres-spec-sims=/path/to/he6-cres-spec-sims
+#common --override_module=katydid=/path/to/katydid
