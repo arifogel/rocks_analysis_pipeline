@@ -8,7 +8,7 @@ _command() {
     echo "Missing NOISE_PATHS array" >&2
     exit 1
   fi
-  bazel run -c opt --@pypi//venv=dev //:local_ssa_katydid -- \
+  time bazel run -c opt --@pypi//venv=dev //:local_ssa_katydid -- \
     --run_name="${RUN_NAME}" \
     --runs_base_dir="${RUNS_DIR}" \
     --katydid_output_dir="${RUN_DIR}/root_files" \

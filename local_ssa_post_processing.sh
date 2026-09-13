@@ -4,7 +4,7 @@ set -euo pipefail
 
 _command() {
   set -euxo pipefail
-  bazel run -c opt --@pypi//venv=dev //:local_ssa_post_processing -- \
+  time bazel run -c opt --@pypi//venv=dev //:local_ssa_post_processing -- \
     --run_name="${RUN_NAME}" \
     --runs_base_dir="${RUNS_DIR}" \
     --katydid_output_dir="${RUN_DIR}/root_files" \

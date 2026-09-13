@@ -4,7 +4,7 @@ set -euo pipefail
 
 _command() {
   set -euxo pipefail
-  bazel run -c opt --@pypi//venv=dev //:local_spec_sims -- \
+  time bazel run -c opt --@pypi//venv=dev //:local_spec_sims -- \
     --run_name="${RUN_NAME}" \
     --noise_run_id=1716 \
     --yaml_config="${YAML_CONFIG}" \
