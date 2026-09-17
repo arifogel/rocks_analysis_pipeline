@@ -3,29 +3,21 @@
 Local, parallel driver for spec-sims subruns.
 
 For each subrun, generates all of its per-field configs via
-RunSpecSims.run(generate_configs_only=True) -- exactly the same call path
-the single-process code already uses, just stopped before it also runs
-each field sequentially -- so config generation and discovery for a subrun
-always happen as a single, uninterrupted unit, with correct sequential
-field indices. Only *after* a subrun's configs are generated does the
-driver fan the resulting per-field config paths out across a flat process
-pool, each calling he6_cres_spec_sims.simulation.Simulation(config_path)
-.run_full() directly -- the same call Experiment.run_sims()'s own
-per-field loop makes -- entirely within one `bazel run` invocation.
-
-generate_configs_only is an explicit, default-False parameter added to
-RunSpecSims.run()/Experiment.__init__ for exactly this purpose (see
-run_spec_sims.py / he6-cres-spec-sims's experiment.py). It does not change
-behavior for any existing caller.
+RunSpecSimsGhcss.run(generate_configs_only=True) -- config generation only,
+no he6_cres_spec_sims import at all (see run_spec_sims_ghcss.py's own module
+docstring for why that's a separate file rather than an edit to
+run_spec_sims.py) -- so config generation and discovery for a subrun always
+happen as a single, uninterrupted unit, with correct sequential field
+indices. Only *after* a subrun's configs are generated does the driver fan
+the resulting per-field config paths out across a flat process pool, each
+invoking ghcss's specsims binary (built from github.com/arifogel/ghcss,
+cmd/specsims) as a subprocess with --config <config_path> -- the Go port of
+the same Simulation(config_path).run_full() call Experiment.run_sims()'s own
+per-field loop used to make -- entirely within one `bazel run` invocation.
 
 Each job's full log is written into the same directory RunSpecSims/DAQ
 already create for that (subrun, field) today:
     runs_base_dir/run_name/subrun_{id}/{i}_field_{field}T/
-
-Requires he6-cres-spec-sims's directory-creation calls to be idempotent
-(mkdir(exist_ok=True)) rather than racily check-then-creating, since many
-fields of the same subrun can now run concurrently and share a parent
-directory. See experiment.py/DAQ.py/simulation.py.
 
 Example:
     bazel run --@pypi//venv=dev //:local_spec_sims -- \\
@@ -44,17 +36,17 @@ even though the rest of this project currently targets a newer version.
 
 import os
 
-# This must run before numpy/scipy are imported anywhere in this process
-# (below, and transitively via he6_cres_spec_sims once RunSpecSims is
-# imported) -- otherwise the underlying BLAS/OpenMP library has already
-# latched onto its default thread count. Without this, each worker process
-# spawned by ProcessPoolExecutor below would *also* try to use every
-# logical core for its own numpy/scipy calls, so N worker processes x N
-# BLAS threads each massively oversubscribes an N-core machine: every core
-# shows 100% busy, but almost all of it is contention/context-switching
-# rather than real work. Using setdefault() rather than a plain assignment
-# so an explicit value the user has already set in their environment is
-# left alone.
+# This must run before numpy is imported anywhere in this process (below,
+# and transitively via run_spec_sims_ghcss's own light numpy usage for field
+# rounding) -- otherwise the underlying BLAS/OpenMP library has already
+# latched onto its default thread count. This matters far less than it used
+# to now that each worker process's actual simulation work happens in a
+# separate ghcss (Go) subprocess rather than in-process via
+# he6_cres_spec_sims/scipy, but it's a harmless, still-technically-correct
+# precaution against the same oversubscription this process's own numpy
+# import could in principle cause, so it's kept rather than removed. Using
+# setdefault() rather than a plain assignment so an explicit value the user
+# has already set in their environment is left alone.
 for _thread_env_var in (
     "OMP_NUM_THREADS",
     "OPENBLAS_NUM_THREADS",
@@ -65,15 +57,37 @@ for _thread_env_var in (
     os.environ.setdefault(_thread_env_var, "1")
 
 import argparse  # noqa: E402
+import subprocess  # noqa: E402
 import sys  # noqa: E402
 import traceback  # noqa: E402
 from concurrent.futures import Future, ProcessPoolExecutor, as_completed  # noqa: E402
 from pathlib import Path  # noqa: E402
 from typing import Any  # noqa: E402
 
-import he6_cres_spec_sims.simulation as he6_simulation  # noqa: E402
+from python.runfiles import runfiles  # noqa: E402
 
-from run_spec_sims import RunSpecSims  # noqa: E402
+from run_spec_sims_ghcss import RunSpecSimsGhcss  # noqa: E402
+
+# Canonical bzlmod repo name for the ghcss module (see MODULE.bazel's
+# bazel_dep(name = "ghcss", ...)) plus the path to the specsims go_binary
+# within it. If the canonical repo name or build layout for that target
+# changes, update this to match -- resolve_specsims_path()'s own error
+# message points back here.
+SPECSIMS_RLOCATION = "ghcss+/cmd/specsims/specsims_"
+
+
+def resolve_specsims_path() -> str:
+    r = runfiles.Create()
+    specsims_path = r.Rlocation(SPECSIMS_RLOCATION)
+    if specsims_path is None or not Path(specsims_path).is_file():
+        raise RuntimeError(
+            f"Could not resolve the ghcss specsims binary via runfiles at "
+            f"'{SPECSIMS_RLOCATION}' (got: {specsims_path}). If the "
+            f"canonical repo name for the ghcss module, or the go_binary's "
+            f"own runfile path, has changed, update SPECSIMS_RLOCATION at "
+            f"the top of this file."
+        )
+    return specsims_path
 
 
 def parse_args() -> argparse.Namespace:
@@ -153,7 +167,7 @@ def build_jobs(args: argparse.Namespace) -> list[dict[str, Any]]:
 
     jobs: list[dict[str, Any]] = []
     for subrun_id in range(args.num_subruns):
-        config_paths: list[Path] = RunSpecSims(
+        config_paths: list[Path] = RunSpecSimsGhcss(
             run_name=args.run_name,
             subrun_id=subrun_id,
             noise_run_id=args.noise_run_id,
@@ -165,7 +179,7 @@ def build_jobs(args: argparse.Namespace) -> list[dict[str, Any]]:
 
         for field_index, config_path in enumerate(config_paths):
             # Matches Results.get_path_name()'s own computation exactly,
-            # since config_path is a real path RunSpecSims/Experiment just
+            # since config_path is a real path RunSpecSimsGhcss just
             # generated (not a predicted/guessed one).
             output_dir: Path = config_path.parent / config_path.stem
             log_path: Path = output_dir / "local_spec_sims.log"
@@ -186,16 +200,23 @@ def _run_one_job(params: dict[str, Any]) -> None:
     """Runs a single (subrun, field) job in this worker process.
 
     This is a top-level function (not a closure) so it can be pickled and
-    sent to a spawned worker process. Calls Simulation(config_path).run_full()
-    directly -- the same call Experiment.run_sims()'s own per-field loop
-    makes -- with stdout/stderr redirected into the job's natural output
-    directory so parallel jobs don't interleave in the terminal.
+    sent to a spawned worker process. Invokes ghcss's specsims binary as a
+    subprocess with --config <config_path> -- the Go port of the same
+    Simulation(config_path).run_full() call Experiment.run_sims()'s own
+    per-field loop used to make -- with its stdout/stderr redirected into
+    the job's natural output directory so parallel jobs don't interleave in
+    the terminal.
     """
     output_dir: Path = params["output_dir"]
     log_path: Path = params["log_path"]
     config_path: Path = params["config_path"]
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    # Resolved once per worker process (not hoisted out to the parent and
+    # passed in), since runfiles.Create()'s state isn't guaranteed to survive
+    # being pickled to a spawned worker -- cheap enough to redo per job.
+    specsims_path: str = resolve_specsims_path()
+
     # buffering=1 (line-buffered): without this, writes to a redirected
     # sys.stdout are fully block-buffered rather than line-buffered, so a
     # log file tailed while the job is still running can appear to lag far
@@ -209,9 +230,21 @@ def _run_one_job(params: dict[str, Any]) -> None:
             print("+++++++++++++++++++++++++++++++++++++++++++++++++\n\n")
             print(f"Running subrun {params['subrun_id']} field {params['field_index']} ({config_path})\n\n")
             print("+++++++++++++++++++++++++++++++++++++++++++++++++")
+            log_file.flush()
 
-            simulation = he6_simulation.Simulation(config_path)
-            simulation.run_full()
+            # check=True: a nonzero exit raises CalledProcessError, caught
+            # by the except Exception block below, same as an in-process
+            # exception used to be. The subprocess's own stdout/stderr
+            # (redirected here, not captured/buffered by Python) already
+            # went straight into log_file, so there's nothing further to
+            # print from a successful or failed run beyond the exception
+            # itself.
+            subprocess.run(
+                [specsims_path, "--config", str(config_path)],
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                check=True,
+            )
 
             print(f"\nsubrun {params['subrun_id']} field {params['field_index']} DONE\n")
         except Exception:
