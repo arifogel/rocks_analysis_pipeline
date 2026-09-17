@@ -73,7 +73,7 @@ from run_spec_sims_ghcss import RunSpecSimsGhcss  # noqa: E402
 # within it. If the canonical repo name or build layout for that target
 # changes, update this to match -- resolve_specsims_path()'s own error
 # message points back here.
-SPECSIMS_RLOCATION = "ghcss+/cmd/specsims/specsims_"
+SPECSIMS_RLOCATION = "ghcss+/cmd/specsims/specsims_/specsims"
 
 
 def resolve_specsims_path() -> str:
