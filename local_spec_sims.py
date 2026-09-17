@@ -232,6 +232,28 @@ def _run_one_job(params: dict[str, Any]) -> None:
             print("+++++++++++++++++++++++++++++++++++++++++++++++++")
             log_file.flush()
 
+            command: list[str] = [specsims_path, "--config", str(config_path)]
+            # Opt-in debugging hook, off by default: SPECSIMS_PROFILE_DURATION
+            # (e.g. "30s") makes *every* job in this run write a
+            # runtime/trace execution trace (see specsims --help) into its
+            # own output_dir and self-terminate after that duration, instead
+            # of running to completion. Meant specifically for diagnosing
+            # contention between many concurrently running specsims
+            # processes sharing a machine's cores -- something a single,
+            # isolated process can't reproduce, so this needs to run as part
+            # of a real run with several jobs actually in flight together.
+            # A run started this way will not produce valid, complete
+            # spec/speck output (every job stops partway through on
+            # purpose) -- it's for profiling only.
+            profile_duration = os.environ.get("SPECSIMS_PROFILE_DURATION")
+            if profile_duration:
+                command += [
+                    "--trace",
+                    str(output_dir / "trace.out"),
+                    "--profile-duration",
+                    profile_duration,
+                ]
+
             # check=True: a nonzero exit raises CalledProcessError, caught
             # by the except Exception block below, same as an in-process
             # exception used to be. The subprocess's own stdout/stderr
@@ -240,7 +262,7 @@ def _run_one_job(params: dict[str, Any]) -> None:
             # print from a successful or failed run beyond the exception
             # itself.
             subprocess.run(
-                [specsims_path, "--config", str(config_path)],
+                command,
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
                 check=True,
