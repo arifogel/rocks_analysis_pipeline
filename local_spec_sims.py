@@ -75,6 +75,13 @@ from run_spec_sims_ghcss import RunSpecSimsGhcss  # noqa: E402
 # message points back here.
 SPECSIMS_RLOCATION = "ghcss+/cmd/specsims/specsims_/specsims"
 
+# Must match exitCodeProfilingStopped in ghcss's cmd/specsims/main.go exactly.
+# A specsims process exits with this code (never 0) when --profile-duration
+# or a signal cuts it short before the pipeline finishes -- deliberate, not a
+# failure, and _run_one_job below treats it as such rather than as a real
+# error.
+SPECSIMS_EXIT_CODE_PROFILING_STOPPED = 3
+
 
 def resolve_specsims_path() -> str:
     r = runfiles.Create()
@@ -255,18 +262,31 @@ def _run_one_job(params: dict[str, Any]) -> None:
                 ]
 
             # check=True: a nonzero exit raises CalledProcessError, caught
-            # by the except Exception block below, same as an in-process
-            # exception used to be. The subprocess's own stdout/stderr
-            # (redirected here, not captured/buffered by Python) already
-            # went straight into log_file, so there's nothing further to
-            # print from a successful or failed run beyond the exception
-            # itself.
-            subprocess.run(
-                command,
-                stdout=log_file,
-                stderr=subprocess.STDOUT,
-                check=True,
-            )
+            # below. The subprocess's own stdout/stderr (redirected here,
+            # not captured/buffered by Python) already went straight into
+            # log_file, so there's nothing further to print from a
+            # successful or failed run beyond the exception itself.
+            try:
+                subprocess.run(
+                    command,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                    check=True,
+                )
+            except subprocess.CalledProcessError as e:
+                if e.returncode == SPECSIMS_EXIT_CODE_PROFILING_STOPPED:
+                    # Deliberate (--profile-duration or a signal cut this
+                    # job short on purpose), not a failure -- see
+                    # SPECSIMS_EXIT_CODE_PROFILING_STOPPED's own comment.
+                    # Returns normally rather than re-raising so this
+                    # doesn't get counted as a failed job by main()'s own
+                    # summary below.
+                    print(
+                        f"\nsubrun {params['subrun_id']} field {params['field_index']} "
+                        f"stopped on purpose for profiling (exit code {e.returncode})\n"
+                    )
+                    return
+                raise
 
             print(f"\nsubrun {params['subrun_id']} field {params['field_index']} DONE\n")
         except Exception:
