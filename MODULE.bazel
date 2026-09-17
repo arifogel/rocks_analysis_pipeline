@@ -23,6 +23,16 @@ git_override(
     remote = "https://github.com/arifogel/katydid.git",
 )
 
+# ghcss: a Go port of he6-cres-spec-sims's simulation pipeline. Pinned to the
+# claude-hcss-port branch (not yet merged to ghcss's own main) since that is
+# where the actual port lives today.
+bazel_dep(name = "ghcss", version = "0.1.0")
+git_override(
+    module_name = "ghcss",
+    branch = "claude-hcss-port",
+    remote = "https://github.com/arifogel/ghcss.git",
+)
+
 interpreters = use_extension("@aspect_rules_py//py/unstable:extension.bzl", "python_interpreters")
 interpreters.toolchain(
     is_default = True,
