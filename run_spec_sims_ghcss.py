@@ -27,6 +27,7 @@ line -- keeping this a drop-in replacement for that one call.
 """
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import List
@@ -34,6 +35,8 @@ from typing import List
 import numpy as np
 import yaml
 from shutil import copyfile
+
+logger = logging.getLogger(__name__)
 
 # Matches the leading integer index run_spec_sims_ghcss.py itself gives every
 # generated config file ("{i}_field_{field}T.yaml") -- used below to sort
@@ -117,13 +120,15 @@ class RunSpecSimsGhcss:
         self.print_run_summary()
 
     def print_run_summary(self):
-        print("\nRun Summary:")
-        print(f"run_name: {self.run_name}")
-        print(f"subrun_id: {self.subrun_id}")
-        print(f"seed: {self.seed}")
-        print(f"noise_run_id: {self.noise_run_id}")
-        print(f"yaml_config: {self.yaml_config}")
-        print(f"json_config: {self.json_config}\n")
+        logger.info(
+            "Run Summary: run_name=%s subrun_id=%s seed=%s noise_run_id=%s yaml_config=%s json_config=%s",
+            self.run_name,
+            self.subrun_id,
+            self.seed,
+            self.noise_run_id,
+            self.yaml_config,
+            self.json_config,
+        )
 
     def run(self, generate_configs_only: bool = True) -> List[Path]:
         if not generate_configs_only:
@@ -147,12 +152,12 @@ class RunSpecSimsGhcss:
 
         base_experiment_dir = self.runs_base_dir / Path(self.run_name)
         base_experiment_dir.mkdir(parents=True, exist_ok=True)
-        print(f"Created directory: {base_experiment_dir} ")
+        logger.info("Created directory: %s", base_experiment_dir)
 
         run_params["output_path"] = base_experiment_dir / Path(f"subrun_{self.subrun_id}")
 
         for key, val in run_params.items():
-            print("{}: {}".format(key, val))
+            logger.info("%s: %s", key, val)
 
         self._create_configs_for_experiment(run_params, yaml_dict)
         self._create_experiment_config_file(run_params)
@@ -174,7 +179,7 @@ class RunSpecSimsGhcss:
         if experiment_dir.exists() and not experiment_dir.is_dir():
             raise ValueError("Not a directory: {} ".format(experiment_dir))
         experiment_dir.mkdir(parents=True, exist_ok=True)
-        print("Created directory: {} ".format(experiment_dir))
+        logger.info("Created directory: %s", experiment_dir)
 
         events_to_simulate = experiment_params["events_to_simulate"]
         betas_to_simulate = experiment_params["betas_to_simulate"]
