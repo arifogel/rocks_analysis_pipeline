@@ -262,25 +262,55 @@ def _run_one_job(params: dict[str, Any]) -> None:
 
             command: list[str] = [specsims_path, "--config", str(config_path)]
             # Opt-in debugging hook, off by default: SPECSIMS_PROFILE_DURATION
-            # (e.g. "30s") makes *every* job in this run write a
-            # runtime/trace execution trace (see specsims --help) into its
-            # own output_dir and self-terminate after that duration, instead
-            # of running to completion. Meant specifically for diagnosing
-            # contention between many concurrently running specsims
-            # processes sharing a machine's cores -- something a single,
-            # isolated process can't reproduce, so this needs to run as part
-            # of a real run with several jobs actually in flight together.
-            # A run started this way will not produce valid, complete
-            # spec/speck output (every job stops partway through on
-            # purpose) -- it's for profiling only.
+            # (e.g. "30s") makes *every* job in this run capture a profile
+            # into its own output_dir and self-terminate after that
+            # duration, instead of running to completion. A run started this
+            # way will not produce valid, complete spec/speck output (every
+            # job stops partway through on purpose) -- it's for profiling
+            # only.
+            #
+            # SPECSIMS_PROFILE_MODE picks which kind, and must be set
+            # together with SPECSIMS_PROFILE_DURATION (silently ignored
+            # otherwise) -- "trace" or "cpu", no default, and never both at
+            # once. These aren't just two flavors of the same thing:
+            # --trace (runtime/trace execution trace, analyzed with
+            # `go tool trace -pprof=...` then `go tool pprof -top`) captures
+            # scheduling latency and off-CPU blocked time -- the right tool
+            # for contention between concurrently running processes, but its
+            # own instrumentation overhead changes the very thing being
+            # measured, and comparing a --trace-instrumented run against an
+            # uninstrumented baseline produced a real, wrong conclusion once
+            # already in this project's own profiling history. --cpuprofile
+            # (runtime/pprof, analyzed directly with `go tool pprof -top` --
+            # no trace-extraction step needed, since it's already pprof
+            # format) samples actual on-CPU execution time instead, a more
+            # direct proxy for wall-clock cost, and is the one to reach for
+            # when the question is "which function is actually expensive"
+            # rather than "are processes contending with each other." Kept
+            # as separate, mutually exclusive modes (never both flags on the
+            # same command) specifically so this hook can't be used to
+            # repeat that same mistake.
             profile_duration = os.environ.get("SPECSIMS_PROFILE_DURATION")
-            if profile_duration:
+            profile_mode = os.environ.get("SPECSIMS_PROFILE_MODE")
+            if profile_duration and profile_mode == "trace":
                 command += [
                     "--trace",
                     str(output_dir / "trace.out"),
                     "--profile-duration",
                     profile_duration,
                 ]
+            elif profile_duration and profile_mode == "cpu":
+                command += [
+                    "--cpuprofile",
+                    str(output_dir / "cpu.prof"),
+                    "--profile-duration",
+                    profile_duration,
+                ]
+            elif profile_duration and not profile_mode:
+                raise ValueError(
+                    "SPECSIMS_PROFILE_DURATION is set but SPECSIMS_PROFILE_MODE isn't -- "
+                    "set it to 'trace' or 'cpu' to pick which profile to capture."
+                )
 
             # check=True: a nonzero exit raises CalledProcessError, caught
             # below. The subprocess's own stdout/stderr (redirected here,
