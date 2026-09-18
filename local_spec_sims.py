@@ -57,6 +57,7 @@ for _thread_env_var in (
     os.environ.setdefault(_thread_env_var, "1")
 
 import argparse  # noqa: E402
+import logging  # noqa: E402
 import subprocess  # noqa: E402
 import sys  # noqa: E402
 import traceback  # noqa: E402
@@ -66,7 +67,10 @@ from typing import Any  # noqa: E402
 
 from python.runfiles import runfiles  # noqa: E402
 
+from logging_setup import init_logging  # noqa: E402
 from run_spec_sims_ghcss import RunSpecSimsGhcss  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 # Canonical bzlmod repo name for the ghcss module (see MODULE.bazel's
 # bazel_dep(name = "ghcss", ...)) plus the path to the specsims go_binary
@@ -160,6 +164,23 @@ def parse_args() -> argparse.Namespace:
         "--dry_run",
         action="store_true",
         help="print the planned jobs without running them",
+    )
+    arg(
+        "--log-level",
+        dest="log_level",
+        type=str,
+        default="INFO",
+        help="root log level (e.g. DEBUG, INFO, WARNING) -- see logging_setup.init_logging",
+    )
+    arg(
+        "--log-override",
+        dest="log_override",
+        type=str,
+        default=None,
+        help=(
+            "comma-separated logger_name=LEVEL overrides for individual loggers "
+            "(e.g. 'botocore=WARNING,run_spec_sims_ghcss=DEBUG') -- see logging_setup.init_logging"
+        ),
     )
 
     return par.parse_args()
@@ -296,6 +317,7 @@ def _run_one_job(params: dict[str, Any]) -> None:
 
 def main() -> None:
     args: argparse.Namespace = parse_args()
+    init_logging(args.log_level, args.log_override)
 
     run_dir: Path = Path(args.runs_base_dir) / args.run_name
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -304,9 +326,12 @@ def main() -> None:
 
     if args.dry_run:
         for job in jobs:
-            print(
-                f"[dry_run] subrun {job['subrun_id']} field {job['field_index']}: "
-                f"config={job['config_path']} output_dir={job['output_dir']}"
+            logger.info(
+                "[dry_run] subrun %s field %s: config=%s output_dir=%s",
+                job["subrun_id"],
+                job["field_index"],
+                job["config_path"],
+                job["output_dir"],
             )
         return
 
@@ -314,7 +339,7 @@ def main() -> None:
         job["output_dir"].mkdir(parents=True, exist_ok=True)
 
     max_jobs: int | None = args.max_jobs
-    print(f"Running {len(jobs)} job(s) with max_jobs={max_jobs or '(cpu count)'}")
+    logger.info("Running %d job(s) with max_jobs=%s", len(jobs), max_jobs or "(cpu count)")
 
     failures: list[str] = []
     with ProcessPoolExecutor(max_workers=max_jobs) as pool:
@@ -324,16 +349,16 @@ def main() -> None:
             job_label: str = f"subrun {job['subrun_id']} field {job['field_index']}"
             try:
                 future.result()
-                print(f"{job_label}: OK (log: {job['log_path']})")
+                logger.info("%s: OK (log: %s)", job_label, job["log_path"])
             except Exception as e:
                 failures.append(job_label)
-                print(f"{job_label}: FAILED ({e}) (log: {job['log_path']})")
+                logger.error("%s: FAILED (%s) (log: %s)", job_label, e, job["log_path"])
 
     if failures:
-        print(f"\n{len(failures)} of {len(jobs)} job(s) failed: {failures}")
+        logger.error("%d of %d job(s) failed: %s", len(failures), len(jobs), failures)
         sys.exit(1)
 
-    print(f"\nAll {len(jobs)} job(s) completed successfully.")
+    logger.info("All %d job(s) completed successfully.", len(jobs))
 
 
 if __name__ == "__main__":

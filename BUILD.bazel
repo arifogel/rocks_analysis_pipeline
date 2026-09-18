@@ -44,6 +44,7 @@ py_binary(
     name = "local_spec_sims",
     srcs = [
         ":local_spec_sims.py",
+        ":logging_setup.py",
         ":run_spec_sims_ghcss.py",
     ],
     data = ["@ghcss//cmd/specsims:specsims"],
