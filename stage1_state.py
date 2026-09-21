@@ -96,6 +96,25 @@ def task_dir(runs_dir: Path, run_name: str, subrun_id: int, field_index: int) ->
     return runs_dir / run_name / f"subrun_{subrun_id}" / f"field_{field_index}"
 
 
+def parse_task_dir(d: Path) -> tuple[str, int, int]:
+    """The inverse of task_dir: recovers (run_name, subrun_id, field_index)
+    from a task's own directory path. Needed because run_stage1_task's own
+    step_fns only ever receive task_dir (see its own doc comment) -- a step
+    that needs to build a TaskIdentity (see api/v1/task_identity.proto) has
+    no other way to recover these three values. Safe to parse back out
+    this way specifically because task_dir's own path structure
+    (runs_dir/run_name/subrun_{id}/field_{index}) is a stable convention
+    this same module defines and controls -- unlike, e.g., parsing a
+    physical quantity like a field *value* out of a display string, which
+    this project has specifically moved away from elsewhere (see
+    task_dir's own doc comment on why it no longer embeds the field value).
+    """
+    field_index = int(d.name.removeprefix("field_"))
+    subrun_id = int(d.parent.name.removeprefix("subrun_"))
+    run_name = d.parent.parent.name
+    return run_name, subrun_id, field_index
+
+
 def get_state(runs_dir: Path, run_name: str, subrun_id: int, field_index: int) -> str | None:
     """Returns the name of the furthest-completed step for this task (per
     STEPS's own order), or None if nothing has been checkpointed yet.

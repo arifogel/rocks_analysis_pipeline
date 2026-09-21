@@ -79,4 +79,42 @@ py_binary(
     ],
 )
 
+py_library(
+    name = "checkpoints_lib",
+    srcs = ["checkpoints.py"],
+)
+
+py_library(
+    name = "stage1_state_lib",
+    srcs = ["stage1_state.py"],
+    deps = [":checkpoints_lib"],
+)
+
+py_library(
+    name = "stage1_steps_lib",
+    srcs = ["stage1_steps.py"],
+    deps = cdeps([
+        requirement("pandas"),
+        requirement("uproot"),
+        requirement("pyyaml"),
+    ]) + [
+        ":stage1_state_lib",
+        "//api/v1:band_py_pb2",
+        "//api/v1:dmtrack_py_pb2",
+        "//api/v1:slew_times_py_pb2",
+        "//api/v1:task_identity_py_pb2",
+        "//api/v1:track_py_pb2",
+    ],
+)
+
+py_binary(
+    name = "stage1_task",
+    srcs = [":stage1_task.py"],
+    main = ":stage1_task.py",
+    deps = [
+        ":stage1_state_lib",
+        ":stage1_steps_lib",
+    ],
+)
+
 python_ide_backport()
