@@ -45,3 +45,14 @@ py_proto_library(
     name = "slew_times_py_pb2",
     deps = [":slew_times_proto"],
 )
+
+proto_library(
+    name = "track_proto",
+    srcs = ["track.proto"],
+    deps = [":task_identity_proto"],
+)
+
+py_proto_library(
+    name = "track_py_pb2",
+    deps = [":track_proto"],
+)

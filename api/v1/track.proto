@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package com.github.helium6cres.rocks_analysis_pipeline.api.v1;
+
+import "api/v1/task_identity.proto";
+
+option go_package = "github.com/Helium6CRES/rocks_analysis_pipeline/api/v1";
+
+// Track matches one reconstructed track, read directly from Katydid's own
+// .root output (the TLongTrackData class, Source/IO/Conversions/
+// KTROOTData.hh) -- not from an intermediate CSV, so field types here match
+// the real ROOT branch types (UInt_t/Int_t/Double_t), verified directly
+// against Katydid's own C++ source, not inferred from how a CSV happened
+// to print them. The current CSV-based pipeline loses this distinction:
+// every one of the six integer fields below prints with a misleading ".0"
+// suffix in tracks.csv, an artifact of pandas silently promoting a mixed
+// dataframe's columns to float64, not anything true about the underlying
+// data.
+//
+// Two fields present in the real ROOT branches (and in tracks.csv) are
+// deliberately omitted: UniqueID and Bits. TLongTrackData inherits from
+// ROOT's own TObject base class, which is what actually puts fUniqueID/
+// fBits on every instance -- they're ROOT's own internal object-bookkeeping
+// fields, not anything Katydid computed about the track, and carry no
+// physics meaning.
+message Track {
+  uint32 track_id = 1;
+  uint32 event_id = 2;
+  int32 band_number = 3;    // signed: real data has negative sideband numbers
+  uint32 event_type = 4;
+  double axial_freq = 5;
+  int32 num_points = 6;
+  double start_frequency = 7;
+  double end_frequency = 8;
+  double freq_length = 9;
+  double start_time_in_run_c = 10;
+  double end_time_in_run_c = 11;
+  double time_length = 12;
+  double start_time_in_acq_c = 13;
+  double end_time_in_acq_c = 14;
+  int32 start_acq_id = 15;
+  double acq_freq_intercept = 16;
+  double bulk_slope = 17;
+  double mean_local_slope = 18;
+  double max_local_slope = 19;
+  double min_local_slope = 20;
+  double std_dev_local_slope = 21;
+  double total_nsp = 22;
+  double mean_nsp = 23;
+  double max_nsp = 24;
+  double min_nsp = 25;
+  double std_dev_nsp = 26;
+  double total_power = 27;
+  double mean_power = 28;
+  double max_power = 29;
+  double min_power = 30;
+  double std_dev_power = 31;
+  double manhattan_length = 32;
+  double density = 33;
+  double nsp_per_unit_length = 34;
+  double density_est_snr = 35;
+  double mle_power_snr = 36;
+}
+
+// TrackList is stage 1's own tracks_proto_done output: every Track from one
+// task's Katydid .root file, plus the TaskIdentity every one of those
+// tracks shares (see task_identity.proto's own doc comment for why it
+// lives here and not on each Track).
+message TrackList {
+  TaskIdentity task = 1;
+  repeated Track tracks = 2;
+}
