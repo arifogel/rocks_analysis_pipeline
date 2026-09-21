@@ -114,13 +114,28 @@ def get_state(runs_dir: Path, run_name: str, subrun_id: int, field_index: int) -
     return furthest
 
 
-def run_stage1_task(runs_dir: Path, run_name: str, subrun_id: int, field_index: int, step_fns: dict[str, Callable[[Path], None]]) -> None:
+def run_stage1_task(
+    runs_dir: Path,
+    run_name: str,
+    subrun_id: int,
+    field_index: int,
+    step_fns: dict[str, Callable[[Path], None]],
+    skip_steps: frozenset[str] = frozenset(),
+) -> None:
     """Runs every step in STEPS, in order, for this task -- resuming
     correctly from wherever a previous attempt left off, since
     run_checkpointed skips any step whose marker already exists. This is
     the actual driver: it's what makes each step (including cleanup steps)
     happen at its fixed point in the sequence, every time this is called,
     rather than a fact that's merely checkable but never acted on.
+
+    Matches, precisely:
+        step = INITIAL_STEP
+        while step != DONE:
+            if not checkpointed(step) and not skipped(step):
+                do_step(step)
+                create_checkpoint(step)
+            step = next_step(step)
 
     step_fns maps each entry in STEPS to the function that performs it
     (taking this task's own task_dir as its only argument) -- injected
@@ -132,8 +147,18 @@ def run_stage1_task(runs_dir: Path, run_name: str, subrun_id: int, field_index: 
     checkpoints.run_checkpointed's own doc comment) -- run_checkpointed
     guards against re-running a step that's already fully done, not against
     a step partially completing.
+
+    skip_steps names steps to treat as skipped(step) above: neither
+    step_fns[step] nor its checkpoint marker gets written, so a skipped
+    step is re-evaluated (and re-skipped) on every future call rather than
+    being permanently recorded as done -- this is what backs the
+    --keep-<x> CLI flags (see stage1_task.py): a kept step's own delete
+    action, and only that action, never runs and never gets checkpointed,
+    while every other step proceeds normally.
     """
     d = task_dir(runs_dir, run_name, subrun_id, field_index)
     d.mkdir(parents=True, exist_ok=True)
     for step in STEPS:
+        if step in skip_steps:
+            continue
         run_checkpointed(d, step, lambda step=step: step_fns[step](d))
