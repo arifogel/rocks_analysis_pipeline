@@ -1,9 +1,11 @@
 """Stage 1 combines what are, as of this writing, three separate local steps
 (local_spec_sims.py -> local_ssa_katydid.py -> local_ssa_post_processing.py's
 per-file .root reading) into a single per-task unit of work meant to run
-entirely on one wulf node: specsims -> Katydid -> proto+zstd conversion,
-with the .speck and .root/slew-time files never needing to leave that node's
-local scratch.
+entirely on one wulf node: specsims -> proto+zstd conversion of its own
+bands.csv/dmtracks.csv output (independent of Katydid entirely -- Katydid
+never touches either file) and, separately, specsims -> Katydid -> proto+zstd
+conversion of Katydid's .root/slew-time output. The .speck, .root, and
+slew-time files never need to leave that node's local scratch.
 
 Only ever one acquisition per subrun (acquisition fixed at 0, decided
 explicitly rather than left implicit -- see the proto schema, where it's
@@ -49,19 +51,25 @@ from checkpoints import is_checkpointed, run_checkpointed
 # the order they run in; there is no other structure.
 STEP_SPECSIMS_DONE = "specsims_done"
 STEP_LOG_COMPRESSED = "log_compressed"
-STEP_LOG_DELETED = "log_deleted"
+STEP_UNCOMPRESSED_LOG_DELETED = "uncompressed_log_deleted"
+# mc_truth (bands.csv + dmtracks.csv) needs only specsims_done -- Katydid
+# never touches either file, so this doesn't wait on katydid_done.
+STEP_MC_TRUTH_PROTO_DONE = "mc_truth_proto_done"
+STEP_MC_TRUTH_DELETED = "mc_truth_deleted"  # bands.csv + dmtracks.csv, no longer needed once converted
 STEP_KATYDID_DONE = "katydid_done"
 STEP_SPECSIMS_OUTPUT_DELETED = "specsims_output_deleted"  # .speck files, no longer needed once Katydid has consumed them
-STEP_PROTO_DONE = "proto_done"
+STEP_TRACKS_PROTO_DONE = "tracks_proto_done"  # .root + slew-times files -> proto
 STEP_KATYDID_OUTPUT_DELETED = "katydid_output_deleted"  # .root + slew-times files, no longer needed once converted
 
 STEPS: list[str] = [
     STEP_SPECSIMS_DONE,
     STEP_LOG_COMPRESSED,
-    STEP_LOG_DELETED,
+    STEP_UNCOMPRESSED_LOG_DELETED,
+    STEP_MC_TRUTH_PROTO_DONE,
+    STEP_MC_TRUTH_DELETED,
     STEP_KATYDID_DONE,
     STEP_SPECSIMS_OUTPUT_DELETED,
-    STEP_PROTO_DONE,
+    STEP_TRACKS_PROTO_DONE,
     STEP_KATYDID_OUTPUT_DELETED,
 ]
 
