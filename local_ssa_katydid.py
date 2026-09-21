@@ -153,6 +153,63 @@ def get_slope(true_field: float, frequency: float = 19.15e9) -> float:
     return approx_slope
 
 
+# The only Katydid processor type, anywhere in its own source tree, whose
+# Configure() reads a "set-field" key (KTMultiBandEventBuilder.cc) --
+# confirmed by grepping Source/ for every file that references "set-field"
+# at all: exactly one. If Katydid ever adds another processor type that
+# also reads this key, add its own type string here too.
+KATYDID_SET_FIELD_PROCESSOR_TYPES = frozenset({"multi-band-event-builder"})
+
+
+def render_katydid_config(base_config_path: str, true_field: float, output_path: Path) -> None:
+    """Writes a copy of base_config_path to output_path with set-field
+    written -- creating it if it wasn't already present -- into the config
+    block of every processor *instance* whose declared type is one that
+    Katydid's own source confirms actually reads that key (see
+    KATYDID_SET_FIELD_PROCESSOR_TYPES), found via the config's own
+    processors: list (each entry's own name: is the key its config block
+    lives under elsewhere in the same document). Deliberately not a fixed
+    location like "mbeb" (fragile: assumes every config names its
+    multi-band-event-builder instance that specific way) and not a blind
+    replace of every key literally named "set-field" anywhere in the
+    document (risky: could clobber an unrelated key of some other,
+    differently-typed processor that happens to share the name) -- this
+    targets exactly the processor instances Katydid's own source says
+    consume this key, by their declared type, wherever they're named.
+
+    This is the actual fix for a real problem, not a preemptive nicety:
+    prior to this, every row in a run shared one static katydid_config
+    file, and nothing anywhere in this pipeline ever varied its
+    multi-band-event-builder instance's set-field value per row --
+    confirmed directly (not assumed) by grepping this file,
+    run_ssa_katydid.py, and sbatch_ssa_katydid.py for any reference to
+    "set-field" at all (none). Separately, and not fixable from this repo:
+    KTMultiBandEventBuilder.cc itself reads the value into fSetField but
+    never references it again anywhere in Katydid's own codebase, so even
+    a correctly-set value currently has no effect on any computation --
+    still worth fixing here regardless, since rendering the field MBEB is
+    told about to match the field actually simulated is this repo's own
+    responsibility, independent of whether Katydid currently acts on it.
+    """
+    with open(base_config_path) as f:
+        config_dict = yaml.load(f, Loader=yaml.FullLoader)
+
+    processors = config_dict.get("processor-toolbox", {}).get("processors", [])
+    target_names = [p["name"] for p in processors if p.get("type") in KATYDID_SET_FIELD_PROCESSOR_TYPES]
+    if not target_names:
+        raise ValueError(
+            f"{base_config_path}: no processor instance of type in "
+            f"{sorted(KATYDID_SET_FIELD_PROCESSOR_TYPES)} found in the processors: list -- "
+            f"nowhere to write set-field."
+        )
+
+    for name in target_names:
+        config_dict.setdefault(name, {})["set-field"] = float(true_field)
+
+    with open(output_path, "w") as f:
+        yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False)
+
+
 def build_slew_root_filename(row: pd.Series, output_dir: str, footer: str) -> str:
     """Reused verbatim (modulo taking output_dir explicitly rather than from
     the row) from run_ssa_katydid.py's build_slew_root_filename."""
@@ -223,6 +280,9 @@ def build_file_df_for_subrun(run_name: str, runs_base_dir: str, subrun_id: int, 
     file_df["slew_file_path"] = file_df.apply(
         lambda row: build_slew_root_filename(row, output_dir, "_SlewTimes.txt"), axis=1
     )
+    file_df["rendered_katydid_config_path"] = file_df.apply(
+        lambda row: build_slew_root_filename(row, output_dir, "_katydid_config.yaml"), axis=1
+    )
 
     return file_df
 
@@ -250,10 +310,12 @@ def apply_dry_run_filters(file_df: pd.DataFrame, args: argparse.Namespace) -> pd
     return filtered
 
 
-def build_katydid_command(row: pd.Series, katydid_path: str, katydid_config: str, noise_paths: list[str]) -> list[str]:
-    """Reused verbatim from run_ssa_katydid.py's run_katydid, aside from
-    where the executable path, config path, and noise paths come from."""
-    katydid_command_list = [katydid_path, "-c", katydid_config]
+def build_katydid_command(row: pd.Series, katydid_path: str, noise_paths: list[str]) -> list[str]:
+    """Reused, with one real change, from run_ssa_katydid.py's run_katydid:
+    -c now points at row's own rendered_katydid_config_path (see
+    render_katydid_config) instead of a single static config path shared,
+    unmodified, by every row."""
+    katydid_command_list = [katydid_path, "-c", row["rendered_katydid_config_path"]]
 
     for i in range(2):
         katydid_command_list.append(f"--spec1.filenames_{i}=" + noise_paths[i])
@@ -306,7 +368,8 @@ def _run_one_job(params: dict) -> None:
         output_dir = Path(row["root_file_path"]).parent
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        command = build_katydid_command(pd.Series(row), katydid_path, katydid_config, noise_paths)
+        render_katydid_config(katydid_config, row["true_field"], Path(row["rendered_katydid_config_path"]))
+        command = build_katydid_command(pd.Series(row), katydid_path, noise_paths)
         print(command, flush=True)
 
         proc = sp.run(command, capture_output=True)
@@ -360,9 +423,10 @@ def main() -> None:
             return
         katydid_path = resolve_katydid_path()
         for _, row in filtered.iterrows():
-            command = build_katydid_command(row, katydid_path, args.katydid_config, args.noise_paths)
+            command = build_katydid_command(row, katydid_path, args.noise_paths)
             print(
-                f"[dry_run] subrun={row['subrun_id']} field_index={row['field_index']} acquisition={row['acquisition']}"
+                f"[dry_run] subrun={row['subrun_id']} field_index={row['field_index']} acquisition={row['acquisition']} "
+                f"(rendered_katydid_config_path not actually written in dry-run mode, same as root/slew output)"
             )
             print(command)
         return
