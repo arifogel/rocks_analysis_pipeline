@@ -21,6 +21,7 @@ import json
 import logging
 import shutil
 import subprocess
+import warnings
 from pathlib import Path
 from typing import Callable
 
@@ -354,6 +355,10 @@ def make_run_specsims(
     at the logger itself, so an explicit override on a child logger wins
     over this handler's own DEBUG level on the parent, regardless of what
     the handler does.
+
+    Also bridges the warnings module (numpy/scipy's own RuntimeWarning
+    etc., which bypass logging entirely by default) into the same log
+    file via logging.captureWarnings, scoped and restored the same way.
     """
 
     def fn(task_dir: Path) -> None:
@@ -377,11 +382,39 @@ def make_run_specsims(
             prev_propagate = he6_logger.propagate
             he6_logger.setLevel(logging.DEBUG)
             he6_logger.propagate = False
+
+            # Bridge Python's warnings module (numpy/scipy's own
+            # RuntimeWarning etc. go through this, not logging, by
+            # default -- see this project's own commit history on why
+            # this matters) into the same log file. captureWarnings
+            # routes warnings.warn() through logging.getLogger(
+            # "py.warnings") -- a different logger than
+            # "he6_cres_spec_sims" above, so it needs the same handler
+            # attached separately (reusing the same Handler instance
+            # rather than opening a second one on the same path).
+            # Restored via warnings.showwarning directly, not
+            # captureWarnings(False), since that would unconditionally
+            # turn capturing off even if something else in this process
+            # had already enabled it before this call.
+            warnings_logger = logging.getLogger("py.warnings")
+            warnings_logger.addHandler(handler)
+            prev_warnings_level = warnings_logger.level
+            prev_warnings_propagate = warnings_logger.propagate
+            warnings_logger.setLevel(logging.DEBUG)
+            warnings_logger.propagate = False
+            prev_showwarning = warnings.showwarning
+            logging.captureWarnings(True)
+
             try:
                 import he6_cres_spec_sims.simulation as he6_simulation
 
                 he6_simulation.Simulation(str(config_path)).run_full()
             finally:
+                warnings.showwarning = prev_showwarning
+                warnings_logger.removeHandler(handler)
+                warnings_logger.setLevel(prev_warnings_level)
+                warnings_logger.propagate = prev_warnings_propagate
+
                 he6_logger.removeHandler(handler)
                 handler.close()
                 he6_logger.setLevel(prev_level)
