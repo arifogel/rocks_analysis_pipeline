@@ -18,9 +18,9 @@ layout (SPECSIMS_CONFIG_FILENAME, ROOT_FILENAME, etc. below).
 """
 
 import json
+import logging
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 from typing import Callable
 
@@ -320,42 +320,58 @@ def make_run_specsims(
     option per instruction, but not the default: ghcss's own measured
     throughput gain (35 MB/min vs. 31 MB/min from he6-cres-spec-sims)
     didn't justify the code-review surface of adopting it project-wide.
+
+    Log capture differs by branch, deliberately: use_ghcss's subprocess
+    has its own stdout piped straight to the log file (the only mechanism
+    available for a subprocess, independent of what it does internally).
+    The in-process he6-cres-spec-sims branch instead attaches a
+    logging.FileHandler directly to the "he6_cres_spec_sims" package
+    logger (every module inside it uses logging.getLogger(__name__), a
+    descendant of that name) -- not root, since a root-level handler
+    would also capture anything else running in this same process for the
+    call's whole duration, and not raw sys.stdout/stderr redirection,
+    since he6-cres-spec-sims's own print() calls were converted to real
+    logger calls specifically so this handler-based capture would work.
+    propagate=False for the same scoping reason, so nothing from this
+    call also reaches a root-level handler if one happens to exist. Fully
+    compatible with cresproc-style per-module overrides
+    (logging.getLogger("he6_cres_spec_sims.simulation_blocks.DAQ").
+    setLevel(...)): Python resolves a logger's effective level starting
+    at the logger itself, so an explicit override on a child logger wins
+    over this handler's own DEBUG level on the parent, regardless of what
+    the handler does.
     """
 
     def fn(task_dir: Path) -> None:
         config_path = render_specsims_config(task_dir, yaml_config, json_config, initial_seed)
-
-        # Line-buffered (buffering=1), matching local_spec_sims.py's own
-        # reasoning exactly: without it, writes to a redirected sys.stdout
-        # are fully block-buffered, so a log file tailed while the job is
-        # still running can appear to lag far behind (or show nothing at
-        # all) even though the job is progressing normally.
-        #
-        # try/finally to restore sys.stdout/sys.stderr afterward: this
-        # function runs inside whatever process called run_stage1_task,
-        # which (unlike local_spec_sims.py's own ProcessPoolExecutor
-        # workers, which exit after one job) may go on to do other things
-        # in the same process afterward.
         log_path = task_dir / LOG_FILENAME
-        real_stdout, real_stderr = sys.stdout, sys.stderr
-        with open(log_path, "w", buffering=1) as log_file:
-            sys.stdout = log_file
-            sys.stderr = log_file
-            try:
-                if use_ghcss:
-                    specsims_path = resolve_specsims_path()
-                    subprocess.run(
-                        [specsims_path, "--config", str(config_path)],
-                        check=True,
-                        stdout=log_file,
-                        stderr=subprocess.STDOUT,
-                    )
-                else:
-                    import he6_cres_spec_sims.simulation as he6_simulation
 
-                    he6_simulation.Simulation(str(config_path)).run_full()
+        if use_ghcss:
+            with open(log_path, "w", buffering=1) as log_file:
+                specsims_path = resolve_specsims_path()
+                subprocess.run(
+                    [specsims_path, "--config", str(config_path)],
+                    check=True,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                )
+        else:
+            he6_logger = logging.getLogger("he6_cres_spec_sims")
+            handler = logging.FileHandler(log_path)
+            he6_logger.addHandler(handler)
+            prev_level = he6_logger.level
+            prev_propagate = he6_logger.propagate
+            he6_logger.setLevel(logging.DEBUG)
+            he6_logger.propagate = False
+            try:
+                import he6_cres_spec_sims.simulation as he6_simulation
+
+                he6_simulation.Simulation(str(config_path)).run_full()
             finally:
-                sys.stdout, sys.stderr = real_stdout, real_stderr
+                he6_logger.removeHandler(handler)
+                handler.close()
+                he6_logger.setLevel(prev_level)
+                he6_logger.propagate = prev_propagate
 
     return fn
 
