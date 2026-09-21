@@ -408,7 +408,7 @@ def make_run_specsims(
             try:
                 import he6_cres_spec_sims.simulation as he6_simulation
 
-                he6_simulation.Simulation(str(config_path)).run_full()
+                he6_simulation.Simulation(config_path).run_full()
             finally:
                 warnings.showwarning = prev_showwarning
                 warnings_logger.removeHandler(handler)
