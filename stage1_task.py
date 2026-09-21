@@ -15,7 +15,12 @@ Example:
         --runs_dir=/path/to/runs \\
         --run_name=myrun \\
         --subrun_id=0 \\
-        --field_index=3
+        --field_index=3 \\
+        --yaml_config=/path/to/base.yaml \\
+        --json_config=/path/to/base.json \\
+        --initial_seed=0 \\
+        --katydid_config=/path/to/katydid_base.yaml \\
+        --noise_paths /path/to/noise_ch0.spec /path/to/noise_ch1.spec
 """
 
 import argparse
@@ -50,6 +55,33 @@ def parse_args() -> argparse.Namespace:
     arg("-r", "--run_name", type=str, required=True)
     arg("-s", "--subrun_id", type=int, required=True)
     arg("-f", "--field_index", type=int, required=True)
+
+    arg("-yc", "--yaml_config", type=str, required=True, help="base specsims yaml config, matching local_spec_sims.py's own --yaml_config")
+    arg("-jc", "--json_config", type=str, required=True, help="base specsims json config (fields_T/traps_A/etc.), matching local_spec_sims.py's own --json_config")
+    arg(
+        "-is",
+        "--initial_seed",
+        type=int,
+        required=True,
+        help="seed for subrun_id=0, matching local_spec_sims.py's own --initial_seed exactly "
+        "(seed = initial_seed + subrun_id)",
+    )
+    arg("-kc", "--katydid_config", type=str, required=True, help="full path to the base katydid yaml config file, matching local_ssa_katydid.py's own --katydid_config")
+    arg(
+        "-np",
+        "--noise_paths",
+        type=str,
+        nargs=2,
+        required=True,
+        metavar=("CHANNEL_0_PATH", "CHANNEL_1_PATH"),
+        help="paths to the two (per-channel) noise .spec(k) files, matching local_ssa_katydid.py's own --noise_paths",
+    )
+    arg(
+        "--use_ghcss",
+        action="store_true",
+        help="use the ghcss Go binary instead of he6-cres-spec-sims for the specsims step (default: "
+        "he6-cres-spec-sims) -- see make_run_specsims's own doc comment for why this isn't the default",
+    )
 
     arg(
         "--keep-uncompressed-log",
@@ -96,6 +128,22 @@ def compute_skip_steps(args: argparse.Namespace) -> frozenset[str]:
     return frozenset(step for flag_dest, step in KEEP_FLAG_STEPS.items() if getattr(args, flag_dest))
 
 
+def build_step_fns(args: argparse.Namespace) -> dict:
+    """Builds the real, complete step_fns dict for this run: everything
+    from stage1_steps.STEP_FNS, with its two placeholders (specsims_done,
+    katydid_done -- see that module's own doc comment on why they're
+    placeholders there) replaced by real closures built from this run's own
+    CLI-provided config. Split out from main() for the same reason as
+    compute_skip_steps above.
+    """
+    step_fns = dict(stage1_steps.STEP_FNS)
+    step_fns["specsims_done"] = stage1_steps.make_run_specsims(
+        args.yaml_config, args.json_config, args.initial_seed, use_ghcss=args.use_ghcss
+    )
+    step_fns["katydid_done"] = stage1_steps.make_run_katydid(args.katydid_config, args.noise_paths)
+    return step_fns
+
+
 def main() -> None:
     args = parse_args()
     run_stage1_task(
@@ -103,7 +151,7 @@ def main() -> None:
         args.run_name,
         args.subrun_id,
         args.field_index,
-        stage1_steps.STEP_FNS,
+        build_step_fns(args),
         skip_steps=compute_skip_steps(args),
     )
 

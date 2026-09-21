@@ -94,9 +94,10 @@ py_library(
     name = "stage1_steps_lib",
     srcs = ["stage1_steps.py"],
     deps = cdeps([
+        requirement("numpy"),
         requirement("pandas"),
-        requirement("uproot"),
         requirement("pyyaml"),
+        requirement("uproot"),
     ]) + [
         ":stage1_state_lib",
         "//api/v1:band_py_pb2",
@@ -104,12 +105,18 @@ py_library(
         "//api/v1:slew_times_py_pb2",
         "//api/v1:task_identity_py_pb2",
         "//api/v1:track_py_pb2",
+        "@he6-cres-spec-sims//src/he6_cres_spec_sims",
+        "@rules_python//python/runfiles",
     ],
 )
 
 py_binary(
     name = "stage1_task",
     srcs = [":stage1_task.py"],
+    data = [
+        "@ghcss//cmd/specsims:specsims",
+        "@katydid//Source/Executables/Main:Katydid",
+    ],
     main = ":stage1_task.py",
     deps = [
         ":stage1_state_lib",
