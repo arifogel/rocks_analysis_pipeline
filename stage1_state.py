@@ -1,10 +1,10 @@
 """Stage 1 combines what are, as of this writing, three separate local steps
 (local_spec_sims.py -> local_ssa_katydid.py -> local_ssa_post_processing.py's
 per-file .root reading) into a single per-task unit of work meant to run
-entirely on one wulf node: specsims -> proto+zstd conversion of its own
-bands.csv/dmtracks.csv output (independent of Katydid entirely -- Katydid
-never touches either file) and, separately, specsims -> Katydid -> proto+zstd
-conversion of Katydid's .root/slew-time output. The .speck, .root, and
+entirely on one wulf node: specsims's own bands.csv/dmtracks.csv output each
+get their own proto+zstd conversion (independent of Katydid entirely --
+Katydid never touches either file), and Katydid's own .root/slew-time output
+each get their own proto+zstd conversion in turn. The .speck, .root, and
 slew-time files never need to leave that node's local scratch.
 
 Only ever one acquisition per subrun (acquisition fixed at 0, decided
@@ -52,24 +52,38 @@ from checkpoints import is_checkpointed, run_checkpointed
 STEP_SPECSIMS_DONE = "specsims_done"
 STEP_LOG_COMPRESSED = "log_compressed"
 STEP_UNCOMPRESSED_LOG_DELETED = "uncompressed_log_deleted"
-# mc_truth (bands.csv + dmtracks.csv) needs only specsims_done -- Katydid
-# never touches either file, so this doesn't wait on katydid_done.
-STEP_MC_TRUTH_PROTO_DONE = "mc_truth_proto_done"
+# bands.csv, dmtracks.csv, tracks.csv (from Katydid's .root), and
+# slew-times each get their own proto conversion step -- each is a
+# separate file today and each is (or, for slew-times, may in the future
+# be) an independently useful artifact on its own, so bundling their
+# conversion together would just mean unbundling it again downstream for
+# no benefit. Deletion stays grouped per source (mc_truth_deleted covers
+# both bands.csv and dmtracks.csv; katydid_output_deleted covers both
+# .root and slew-times) rather than also going fully per-artifact:
+# deletion is a cheap, already-idempotent unlink() either way, so it
+# doesn't need the same per-artifact crash-safety granularity that
+# production steps do (where the thing at risk is real, potentially
+# expensive compute, not a trivial retry).
+STEP_BANDS_PROTO_DONE = "bands_proto_done"
+STEP_DMTRACKS_PROTO_DONE = "dmtracks_proto_done"
 STEP_MC_TRUTH_DELETED = "mc_truth_deleted"  # bands.csv + dmtracks.csv, no longer needed once converted
 STEP_KATYDID_DONE = "katydid_done"
 STEP_SPECSIMS_OUTPUT_DELETED = "specsims_output_deleted"  # .speck files, no longer needed once Katydid has consumed them
-STEP_TRACKS_PROTO_DONE = "tracks_proto_done"  # .root + slew-times files -> proto
-STEP_KATYDID_OUTPUT_DELETED = "katydid_output_deleted"  # .root + slew-times files, no longer needed once converted
+STEP_TRACKS_PROTO_DONE = "tracks_proto_done"  # .root -> proto
+STEP_SLEW_PROTO_DONE = "slew_proto_done"  # slew-times -> proto
+STEP_KATYDID_OUTPUT_DELETED = "katydid_output_deleted"  # .root + slew-times, no longer needed once converted
 
 STEPS: list[str] = [
     STEP_SPECSIMS_DONE,
     STEP_LOG_COMPRESSED,
     STEP_UNCOMPRESSED_LOG_DELETED,
-    STEP_MC_TRUTH_PROTO_DONE,
+    STEP_BANDS_PROTO_DONE,
+    STEP_DMTRACKS_PROTO_DONE,
     STEP_MC_TRUTH_DELETED,
     STEP_KATYDID_DONE,
     STEP_SPECSIMS_OUTPUT_DELETED,
     STEP_TRACKS_PROTO_DONE,
+    STEP_SLEW_PROTO_DONE,
     STEP_KATYDID_OUTPUT_DELETED,
 ]
 

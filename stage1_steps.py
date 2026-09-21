@@ -62,11 +62,13 @@ def _not_implemented(step_name: str):
 
 
 run_specsims = _not_implemented("run_specsims")
-run_mc_truth_proto_conversion = _not_implemented("run_mc_truth_proto_conversion")  # bands.csv + dmtracks.csv -> proto
+run_bands_proto_conversion = _not_implemented("run_bands_proto_conversion")  # bands.csv -> proto
+run_dmtracks_proto_conversion = _not_implemented("run_dmtracks_proto_conversion")  # dmtracks.csv -> proto
 delete_mc_truth = _not_implemented("delete_mc_truth")  # bands.csv + dmtracks.csv
 run_katydid = _not_implemented("run_katydid")
 delete_specsims_output = _not_implemented("delete_specsims_output")  # .speck files
-run_tracks_proto_conversion = _not_implemented("run_tracks_proto_conversion")  # .root + slew -> proto
+run_tracks_proto_conversion = _not_implemented("run_tracks_proto_conversion")  # .root -> proto
+run_slew_proto_conversion = _not_implemented("run_slew_proto_conversion")  # slew-times -> proto
 delete_katydid_output = _not_implemented("delete_katydid_output")  # .root + slew
 
 # Matches stage1_state.STEPS's own order exactly -- see that module.
@@ -74,10 +76,12 @@ STEP_FNS = {
     "specsims_done": run_specsims,
     "log_compressed": compress_log,
     "uncompressed_log_deleted": delete_uncompressed_log,
-    "mc_truth_proto_done": run_mc_truth_proto_conversion,
+    "bands_proto_done": run_bands_proto_conversion,
+    "dmtracks_proto_done": run_dmtracks_proto_conversion,
     "mc_truth_deleted": delete_mc_truth,
     "katydid_done": run_katydid,
     "specsims_output_deleted": delete_specsims_output,
     "tracks_proto_done": run_tracks_proto_conversion,
+    "slew_proto_done": run_slew_proto_conversion,
     "katydid_output_deleted": delete_katydid_output,
 }
