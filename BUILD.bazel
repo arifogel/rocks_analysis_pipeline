@@ -99,6 +99,7 @@ py_library(
         requirement("pyyaml"),
         requirement("uproot"),
     ]) + [
+        ":rocks_utility_lib",
         ":stage1_state_lib",
         "//api/v1:band_py_pb2",
         "//api/v1:dmtrack_py_pb2",
