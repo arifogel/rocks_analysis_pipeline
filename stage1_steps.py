@@ -20,6 +20,7 @@ layout (SPECSIMS_CONFIG_FILENAME, ROOT_FILENAME, etc. below).
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Callable
 
@@ -324,16 +325,39 @@ def make_run_specsims(
     def fn(task_dir: Path) -> None:
         config_path = render_specsims_config(task_dir, yaml_config, json_config, initial_seed)
 
-        if use_ghcss:
-            specsims_path = resolve_specsims_path()
-            subprocess.run([specsims_path, "--config", str(config_path)], check=True)
-        else:
-            import he6_cres_spec_sims.simulation as he6_simulation
+        # Line-buffered (buffering=1), matching local_spec_sims.py's own
+        # reasoning exactly: without it, writes to a redirected sys.stdout
+        # are fully block-buffered, so a log file tailed while the job is
+        # still running can appear to lag far behind (or show nothing at
+        # all) even though the job is progressing normally.
+        #
+        # try/finally to restore sys.stdout/sys.stderr afterward: this
+        # function runs inside whatever process called run_stage1_task,
+        # which (unlike local_spec_sims.py's own ProcessPoolExecutor
+        # workers, which exit after one job) may go on to do other things
+        # in the same process afterward.
+        log_path = task_dir / LOG_FILENAME
+        real_stdout, real_stderr = sys.stdout, sys.stderr
+        with open(log_path, "w", buffering=1) as log_file:
+            sys.stdout = log_file
+            sys.stderr = log_file
+            try:
+                if use_ghcss:
+                    specsims_path = resolve_specsims_path()
+                    subprocess.run(
+                        [specsims_path, "--config", str(config_path)],
+                        check=True,
+                        stdout=log_file,
+                        stderr=subprocess.STDOUT,
+                    )
+                else:
+                    import he6_cres_spec_sims.simulation as he6_simulation
 
-            he6_simulation.Simulation(str(config_path)).run_full()
+                    he6_simulation.Simulation(str(config_path)).run_full()
+            finally:
+                sys.stdout, sys.stderr = real_stdout, real_stderr
 
     return fn
-
 
 
 def delete_specsims_output(task_dir: Path) -> None:
