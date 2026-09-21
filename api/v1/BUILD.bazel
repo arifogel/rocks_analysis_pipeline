@@ -23,3 +23,14 @@ py_proto_library(
     name = "band_py_pb2",
     deps = [":band_proto"],
 )
+
+proto_library(
+    name = "dmtrack_proto",
+    srcs = ["dmtrack.proto"],
+    deps = [":task_identity_proto"],
+)
+
+py_proto_library(
+    name = "dmtrack_py_pb2",
+    deps = [":dmtrack_proto"],
+)
