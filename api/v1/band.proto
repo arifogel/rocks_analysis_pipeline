@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package com.github.helium6cres.rocks_analysis_pipeline.api.v1;
+
+import "api/v1/task_identity.proto";
+
+option go_package = "github.com/Helium6CRES/rocks_analysis_pipeline/api/v1";
+
+// Band matches one row of specsims's own bands.csv (Band.to_dict() in
+// he6-cres-spec-sims) -- one frequency sub-band of one track segment,
+// produced by SideBandBuilder.
+//
+// Column-for-column match with the real, per-task bands.csv (verified
+// against an actual uploaded file, not assumed): acquisition, start_time,
+// start_freq, end_time, end_freq, power, event, track, band. The
+// per-task file carries no identity columns of its own (also verified
+// directly) -- that's what TaskIdentity, on the wrapping BandList below,
+// is for.
+message Band {
+  int32 acquisition = 1;
+  double start_time = 2;
+  double start_freq = 3;
+  double end_time = 4;
+  double end_freq = 5;
+  double power = 6;
+  int32 event = 7;
+  int32 track = 8;
+  int32 band = 9;  // signed: negative/positive sideband order relative to the carrier
+}
+
+// BandList is stage 1's own bands_proto_done output: every Band row from
+// one task's bands.csv, plus the TaskIdentity every one of those rows
+// shares (see task_identity.proto's own doc comment for why it lives here
+// and not on each Band).
+message BandList {
+  TaskIdentity task = 1;
+  repeated Band bands = 2;
+}

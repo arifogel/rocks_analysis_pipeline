@@ -1,0 +1,25 @@
+load("@protobuf//bazel:proto_library.bzl", "proto_library")
+load("@protobuf//bazel:py_proto_library.bzl", "py_proto_library")
+
+package(default_visibility = ["//visibility:public"])
+
+proto_library(
+    name = "task_identity_proto",
+    srcs = ["task_identity.proto"],
+)
+
+py_proto_library(
+    name = "task_identity_py_pb2",
+    deps = [":task_identity_proto"],
+)
+
+proto_library(
+    name = "band_proto",
+    srcs = ["band.proto"],
+    deps = [":task_identity_proto"],
+)
+
+py_proto_library(
+    name = "band_py_pb2",
+    deps = [":band_proto"],
+)
