@@ -33,6 +33,7 @@ import argparse
 from pathlib import Path
 
 import stage1_steps
+from noise_paths import resolve_noise_paths_from_id
 from stage1_state import (
     STEP_KATYDID_OUTPUT_DELETED,
     STEP_MC_TRUTH_DELETED,
@@ -77,7 +78,7 @@ def parse_args() -> argparse.Namespace:
     # SQL-based noise-path resolution (run_spec_sims.py, before commit
     # ec2a84c54c3da51efe17c6b01cc06ed19542ca15 removed it) as an option
     # alongside directly-given paths, rather than only the latter -- see
-    # stage1_steps.resolve_noise_paths_from_id's own doc comment. The same
+    # noise_paths.resolve_noise_paths_from_id's own doc comment. The same
     # resolved value feeds both he6-cres-spec-sims's own noise injection
     # (make_run_specsims) and Katydid's spec1 input (make_run_katydid):
     # physically the same underlying noise reference, not two independent
@@ -157,7 +158,7 @@ def resolve_noise_paths(args: argparse.Namespace) -> list[str]:
     same reason as compute_skip_steps above.
     """
     if args.noise_id is not None:
-        return stage1_steps.resolve_noise_paths_from_id(args.noise_id)
+        return resolve_noise_paths_from_id(args.noise_id)
     return args.noise_paths
 
 

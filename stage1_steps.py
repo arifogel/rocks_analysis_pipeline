@@ -33,7 +33,6 @@ import yaml
 from python.runfiles import runfiles
 
 from api.v1 import band_pb2, dmtrack_pb2, slew_times_pb2, task_identity_pb2, track_pb2
-from rocks_utility import he6cres_db_query
 from stage1_state import parse_task_dir
 
 SPECSIMS_RLOCATION = "ghcss+/cmd/specsims/specsims_/specsims"  # matches local_spec_sims.py's own constant
@@ -256,62 +255,6 @@ def render_katydid_config(base_config_path: str, true_field: float, output_path:
 
     with open(output_path, "w") as f:
         yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False)
-
-
-def resolve_noise_paths_from_id(noise_id: int) -> list[str]:
-    """Restores RunSpecSims.get_noise_fp's own SQL-based noise-path
-    resolution (run_spec_sims.py, before commit ec2a84c54c3da51efe17c6b01cc06ed19542ca15
-    removed it entirely), adapted from a method on that class to a
-    standalone function here. Behavior matches the original exactly,
-    including its own comments/reasoning:
-
-    - Queries he6cres_runs.spec_files for noise_id, ordered by channel,
-      taking the first 2 rows (channel 0 and 1) -- "just takes the first
-      file in this run_id (assumption is it's a one file acq)".
-    - Groups by file_in_acq and aggregates into one ordered-by-channel
-      path list per acquisition, taking the first such group. The dummy
-      true_field=0 column exists only because aggregate_paths's own
-      aggregation (used elsewhere for real signal files, where true_field
-      is meaningful) requires that column to exist -- meaningless for
-      noise files, preserved as-is rather than reworked, matching this
-      project's own decision to keep this restoration a faithful port,
-      not a rewrite.
-    - Translates the stored path (relative to /mnt) to wulf's own
-      directory structure, and verifies each resolved file actually
-      exists before returning -- exactly the check this project's own
-      RuntimeError-on-noise-load-failure fix (see this repo's own commit
-      history) is the second line of defense for, not a replacement for.
-    """
-    query_he6_db = """
-                    SELECT f.run_id, f.file_path, f.file_in_acq, f.channel
-                    FROM he6cres_runs.spec_files as f
-                    WHERE f.run_id = {}
-                    ORDER BY f.channel
-                    LIMIT 2
-                  """.format(
-        noise_id
-    )
-
-    noise_file_df = he6cres_db_query(query_he6_db)
-
-    def aggregate_paths(group):
-        ordered_paths = group.sort_values(by="channel")["file_path"].apply(str).tolist()
-        return pd.Series({"true_field": group["true_field"].iloc[0], "file_path": ordered_paths})
-
-    # Make dummy true_field column to use agg function. this is dumb fix later
-    noise_file_df["true_field"] = 0
-    noise_file_df = noise_file_df.groupby("file_in_acq").apply(aggregate_paths).reset_index(drop=True)
-
-    noise_file_path = noise_file_df["file_path"].iloc[0]
-
-    # Convert to directory structure on wulf
-    wulf_noise_paths = [Path("/data/raid2/eliza4/he6_cres/") / Path(old).relative_to("/mnt") for old in noise_file_path]
-
-    for noise_file in wulf_noise_paths:
-        if not noise_file.is_file():
-            raise UserWarning(f"{noise_file} doesn't exist")
-
-    return [str(wnp) for wnp in wulf_noise_paths]
 
 
 def render_specsims_config(task_dir: Path, yaml_config: str, json_config: str, initial_seed: int, noise_paths: list[str]) -> Path:
