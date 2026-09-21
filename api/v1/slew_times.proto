@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package com.github.helium6cres.rocks_analysis_pipeline.api.v1;
+
+import "api/v1/task_identity.proto";
+
+option go_package = "github.com/Helium6CRES/rocks_analysis_pipeline/api/v1";
+
+// SlewTimes matches one row of Katydid's own rf-slew-to-vec ("stv")
+// processor output -- the trap-clearing (ExB) voltage-on/off window
+// boundaries for one cycle, read out of a plain "Time_On,Time_Off" text
+// file (not a ROOT branch, so no C++ type to check against as with
+// track.proto -- but every real sample value observed is plainly
+// fractional, so double is unambiguous here).
+message SlewTimes {
+  double time_on = 1;
+  double time_off = 2;
+}
+
+// SlewTimesList is stage 1's own slew_proto_done output: every SlewTimes
+// row from one task's own _SlewTimes.txt, plus the TaskIdentity every one
+// of those rows shares (see task_identity.proto's own doc comment for why
+// it lives here and not on each SlewTimes).
+message SlewTimesList {
+  TaskIdentity task = 1;
+  repeated SlewTimes slew_times = 2;
+}
