@@ -47,3 +47,8 @@ repos:
       - id: djlint
         types_or: [jinja, html]
         files: \.(jinja|jinja2|html\.jinja)$
+  - repo: https://github.com/renovatebot/pre-commit-hooks
+    rev: 470fe6459fc7c36edb8160e6957a1b96200b94dd # frozen: 44.5.1
+    hooks:
+      - id: renovate-config-validator
+        files: '^renovate\.json$'
