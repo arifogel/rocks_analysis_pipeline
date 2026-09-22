@@ -34,6 +34,7 @@ import yaml
 from python.runfiles import runfiles
 
 from api.v1 import band_pb2, dmtrack_pb2, slew_times_pb2, task_identity_pb2, track_pb2
+from logging_setup import base_fmt
 from stage1_state import parse_task_dir
 
 logger = logging.getLogger(__name__)
@@ -415,6 +416,7 @@ def make_run_specsims(
         else:
             he6_logger = logging.getLogger("he6_cres_spec_sims")
             handler = logging.FileHandler(log_path)
+            handler.setFormatter(logging.Formatter(f"{base_fmt}: %(message)s"))
             he6_logger.addHandler(handler)
             prev_propagate = he6_logger.propagate
             he6_logger.propagate = False
