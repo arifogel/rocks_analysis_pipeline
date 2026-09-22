@@ -56,6 +56,7 @@ DMTRACKS_CSV_FILENAME = "dmtracks.csv"
 # Katydid's own output layout within task_dir.
 ROOT_FILENAME = "track.root"
 SLEW_TIMES_FILENAME = "slew_times.txt"
+KATYDID_LOG_FILENAME = "katydid.log"
 
 # This module's own proto+zstd output layout within task_dir.
 BANDS_PROTO_FILENAME = "bands.pb.zst"
@@ -63,10 +64,14 @@ DMTRACKS_PROTO_FILENAME = "dmtracks.pb.zst"
 TRACKS_PROTO_FILENAME = "tracks.pb.zst"
 SLEW_TIMES_PROTO_FILENAME = "slew_times.pb.zst"
 
-# Katydid's own branch name (see api/v1/track.proto's own doc comment: the
-# TLongTrackData class, Source/IO/Conversions/KTROOTData.hh) for the tree
-# holding one task's reconstructed tracks.
-TRACKS_TREE_NAME = "MultiBandEvent/fTracks"
+# Katydid's own top-level tree name (see KTROOTTreeTypeWriterEventAnalysis.cc's
+# own WriteMultiBandEvent, and this project's own confirmation against
+# local_ssa_post_processing.py's proven-working extraction). "MultiBandEvent"
+# and "fTracks" are nested sub-branches *within* this tree, reached via
+# chained indexing (see run_tracks_proto_conversion's own doc comment for
+# why), not a slash-joined top-level tree path -- the earlier
+# "MultiBandEvent/fTracks" value here was wrong, confirmed by a real crash.
+MB_EVENTS_TREE_NAME = "MB-events"
 
 
 def compress_log(task_dir: Path) -> None:
@@ -512,20 +517,60 @@ def make_run_katydid(katydid_config: str, noise_paths: list[str]) -> Callable[[P
     """Builds the run_katydid step function for one stage-1 run, capturing
     katydid_config/noise_paths via closure, for the same reason as
     make_run_specsims above.
+
+    Katydid's own stdout/stderr (its own C++ logging -- factory
+    registrations, its own welcome banner, PROG/WARN lines, etc.) is
+    piped to its own log file (KATYDID_LOG_FILENAME, separate from
+    LOG_FILENAME/specsims.log -- a different step's output, and
+    make_run_specsims's own log file is opened in "w" mode, so sharing
+    one file would risk one step's output clobbering the other's) rather
+    than inherited from the parent process, the same way use_ghcss's own
+    subprocess branch in make_run_specsims already does -- without this,
+    it goes straight to the console, the only mechanism available for a
+    subprocess regardless of what it does internally.
     """
 
     def fn(task_dir: Path) -> None:
         katydid_path = resolve_katydid_path()
         command = build_katydid_command_for_task(task_dir, katydid_path, katydid_config, noise_paths)
-        subprocess.run(command, check=True)
+        log_path = task_dir / KATYDID_LOG_FILENAME
+        with open(log_path, "w", buffering=1) as log_file:
+            subprocess.run(command, check=True, stdout=log_file, stderr=subprocess.STDOUT)
 
     return fn
 
 
 def run_tracks_proto_conversion(task_dir: Path) -> None:
     """track.root -> TrackList -> tracks.pb.zst, reading the .root file
-    directly via uproot (not through an intermediate CSV, so field types
-    match the real ROOT branch types -- see track.proto's own doc comment).
+    directly via uproot.
+
+    Reads from f["MB-events"]["MultiBandEvent"]["fTracks"] -- matching
+    local_ssa_post_processing.py's own build_tracks_for_one_root_file
+    exactly, the proven, working source of the real tracks.csv this
+    schema was modeled on. Two wrong guesses along the way, both
+    corrected here: a flat "MultiBandEvent/fTracks" string passed to a
+    single uproot.open()[...] call (this project's own first guess --
+    "MultiBandEvent"/"fTracks" are nested sub-branches *within* the
+    "MB-events" tree, not a slash-joined top-level tree path); and the
+    separate, standalone "tracks" tree (Katydid's own WriteLongTrack
+    output -- pre-event-building long-track candidates, a genuinely
+    different dataset from the post-event-building tracks actually kept
+    in each MultiBandEvent, which is what the real tracks.csv reflects).
+
+    Each scalar per-track branch is named "fTracks.f<Name>" (e.g.
+    "fTracks.fTrackId"); branch_to_field's own keys are already the
+    stripped form ("TrackId"), matching local_ssa_post_processing.py's
+    own key[len("fTracks."):] slice. The nested, jagged fPoints sub-array
+    (per-point data within each track -- a separate, more granular
+    dataset; see cresproc/model.py's own, different extraction of it from
+    the standalone "tracks" tree) is skipped via its own AsObjects
+    interpretation, same as local_ssa_post_processing.py.
+
+    Flattening uses np.concatenate over each field's own per-event jagged
+    sub-arrays -- matching cresproc/model.py's own, already-optimized
+    approach (bulk numpy, no pandas), not local_ssa_post_processing.py's
+    own O(n^2) np.append-in-a-loop flat() helper, per direct instruction
+    to follow cresproc's approach specifically.
 
     Unlike bands.csv/dmtracks.csv, ROOT branch names are PascalCase
     (TrackId, BandNumber, ...) while Track's own proto field names are
@@ -533,7 +578,8 @@ def run_tracks_proto_conversion(task_dir: Path) -> None:
     name mapping rather than a positional or same-name correspondence.
     UniqueID/Bits (ROOT's own TObject bookkeeping, not Katydid data -- see
     track.proto's own doc comment) are simply not in this mapping, so
-    they're dropped by omission.
+    they're dropped by omission -- along with fPoints, they're the only
+    branches this leaves unread.
     """
     branch_to_field = {
         "TrackId": "track_id",
@@ -573,18 +619,30 @@ def run_tracks_proto_conversion(task_dir: Path) -> None:
         "DensityEstSNR": "density_est_snr",
         "MLEPowerSNR": "mle_power_snr",
     }
+    branch_prefix = "fTracks.f"
 
     root_path = task_dir / ROOT_FILENAME
     with uproot.open(root_path) as f:
-        arrays = f[TRACKS_TREE_NAME].arrays(list(branch_to_field), library="np")
+        tracks_root = f[MB_EVENTS_TREE_NAME]["MultiBandEvent"]["fTracks"]
+
+        flat_fields: dict[str, np.ndarray] = {}
+        for key, branch in tracks_root.items():
+            if branch.interpretation.__class__.__name__ == "AsObjects":
+                continue  # skips fPoints, the nested per-point sub-array
+            name = key[len(branch_prefix):] if key.startswith(branch_prefix) else key
+            field = branch_to_field.get(name)
+            if field is None:
+                continue
+            nested = branch.array(library="np")
+            flat_fields[field] = np.concatenate(nested) if len(nested) else np.array([])
 
     track_list = track_pb2.TrackList()
     track_list.task.CopyFrom(_task_identity(task_dir))
-    num_rows = len(next(iter(arrays.values()))) if arrays else 0
+    num_rows = len(next(iter(flat_fields.values()))) if flat_fields else 0
     for i in range(num_rows):
         t = track_list.tracks.add()
-        for branch, field in branch_to_field.items():
-            setattr(t, field, arrays[branch][i].item())
+        for field, values in flat_fields.items():
+            setattr(t, field, values[i].item())
 
     _write_proto_zst(track_list, task_dir / TRACKS_PROTO_FILENAME)
 
