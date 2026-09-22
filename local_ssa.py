@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """
 Local, parallel orchestration driver for this project's ssa (spec-sims and
-analysis) pipeline -- currently stage 1 only (fans out stage1_task across
-every (subrun_id, field_index) task for a run, via a ThreadPoolExecutor,
-not a ProcessPoolExecutor -- see the reasoning below); stage 2 (the merge
-step, not yet designed) is meant to join this same orchestrator once it
-exists, rather than get its own separate driver.
+analysis) pipeline: fans out stage1_task across every (subrun_id,
+field_index) task for a run, via a ThreadPoolExecutor, not a
+ProcessPoolExecutor -- see the reasoning below -- then, once every task has
+completed successfully, calls stage2_merge.run_stage2_merge directly
+in-process (no subprocess: unlike stage1_task, there's no crash-isolation
+need for a pure read-and-merge step) to merge that run's own bands/
+dmtracks/tracks into runs_dir/run_name/{bands,dmtracks,tracks}.pb.zst (see
+stage2_merge.py's own module doc comment for the real logic).
 
 Crash isolation is achieved by stage1_task itself running as its own fresh
 subprocess, once per task -- not by this orchestrator's own worker being a
@@ -108,6 +111,7 @@ from typing import Any
 
 from logging_setup import base_fmt, init_logging
 from stage1_state import task_dir
+from stage2_merge import run_stage2_merge
 
 logger = logging.getLogger(__name__)
 
@@ -341,6 +345,10 @@ def main() -> None:
         sys.exit(1)
 
     logger.info("All %d task(s) completed successfully.", len(jobs))
+
+    logger.info("starting stage 2 merge")
+    run_stage2_merge(Path(args.runs_dir), args.run_name)
+    logger.info("stage 2 merge complete")
 
 
 if __name__ == "__main__":

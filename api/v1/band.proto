@@ -36,3 +36,11 @@ message BandList {
   TaskIdentity task = 1;
   repeated Band bands = 2;
 }
+
+// BandLists is stage 2's own merge-step output: every task's own BandList
+// for one run, gathered as-is (not flattened -- each entry keeps its own
+// TaskIdentity, so no per-row identity is lost or needs duplicating; see
+// task_identity.proto's own doc comment for the full reasoning).
+message BandLists {
+  repeated BandList band_lists = 1;
+}

@@ -79,3 +79,11 @@ message DMTrackList {
   TaskIdentity task = 1;
   repeated DMTrack dmtracks = 2;
 }
+
+// DMTrackLists is stage 2's own merge-step output: every task's own
+// DMTrackList for one run, gathered as-is (not flattened -- see
+// BandLists's own doc comment in band.proto for the full reasoning,
+// identical here).
+message DMTrackLists {
+  repeated DMTrackList dmtrack_lists = 1;
+}

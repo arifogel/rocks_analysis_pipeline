@@ -70,3 +70,10 @@ message TrackList {
   TaskIdentity task = 1;
   repeated Track tracks = 2;
 }
+
+// TrackLists is stage 2's own merge-step output: every task's own
+// TrackList for one run, gathered as-is (not flattened -- see BandLists's
+// own doc comment in band.proto for the full reasoning, identical here).
+message TrackLists {
+  repeated TrackList track_lists = 1;
+}

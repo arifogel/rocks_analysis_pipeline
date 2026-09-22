@@ -1,0 +1,141 @@
+"""Stage 2: merges every stage-1 task's own bands/dmtracks/tracks proto
+output for one run into a single, per-run BandLists/DMTrackLists/TrackLists
+file each -- runs_dir/run_name/{bands,dmtracks,tracks}.pb.zst, sibling to
+that run's own subrun_*/ directories.
+
+Deliberately a merge, not a flatten: each task's own BandList/DMTrackList/
+TrackList (already carrying its own TaskIdentity -- see task_identity.proto's
+own doc comment) is gathered as-is into the wrapping BandLists/DMTrackLists/
+TrackLists (see each one's own doc comment in band.proto/dmtrack.proto/
+track.proto), not exploded into one flat list of rows. No per-row identity
+is lost, and no schema change to Band/DMTrack/Track themselves was needed
+for this.
+
+slew_times is deliberately not merged here: assumed identical across every
+task of a run (same DAQ config, same simulated acquisition timing), and not
+consumed by cresproc regardless -- see this project's own commit history.
+
+Called directly (in-process, not as a subprocess) from local_ssa.py's own
+main() after every stage-1 task for a run completes, since there's no
+crash-isolation need for a pure read-and-merge step the way there was for
+stage1_task's own simulation/Katydid work. Also has its own thin CLI driver
+(stage2_merge_task.py) for the wulf case: stage 1 orchestrated separately
+from this driver (see local_ssa.py's own module doc comment on why),
+needing stage 2 run as its own, separate step against whatever stage-1
+output already exists on disk.
+"""
+
+import logging
+from pathlib import Path
+from typing import Callable, TypeVar
+
+import compression.zstd as zstd
+
+from api.v1 import band_pb2, dmtrack_pb2, track_pb2
+from stage1_steps import BANDS_PROTO_FILENAME, DMTRACKS_PROTO_FILENAME, TRACKS_PROTO_FILENAME
+
+logger = logging.getLogger(__name__)
+
+ListMessage = TypeVar("ListMessage")
+
+
+def find_task_dirs(runs_dir: Path, run_name: str) -> list[Path]:
+    """Every stage-1 task directory that actually exists for this run --
+    matches stage1_state.task_dir's own path convention
+    (runs_dir/run_name/subrun_<id>/field_<index>), discovered by globbing
+    rather than computed from an expected count, so this merges whatever
+    stage 1 actually produced (matching local_ssa_post_processing.py's own
+    glob-based discovery, not stage1's own explicit range(num_subruns)/
+    range(num_fields) computation -- there's no equivalent here of
+    json_config's own fields_T to compute an expected count from, and glob
+    discovery is what lets this run standalone against partial or
+    already-cleaned-up runs).
+    """
+    return sorted((runs_dir / run_name).glob("subrun_*/field_*"))
+
+
+def _read_proto_zst(message_cls: Callable[[], ListMessage], path: Path) -> ListMessage:
+    with zstd.open(path, "rb") as f:
+        message = message_cls()
+        message.ParseFromString(f.read())
+    return message
+
+
+def _write_proto_zst(message, path: Path) -> None:
+    """Duplicated from stage1_steps.py's own _write_proto_zst (a private
+    helper there, not meant for import across a module boundary it wasn't
+    designed for) -- same reasoning as that module's own
+    resolve_specsims_path duplication precedent: small, self-contained
+    piece, not worth reaching across for."""
+    with zstd.open(path, "wb") as f:
+        f.write(message.SerializeToString())
+
+
+def _merge_one_type(
+    task_dirs: list[Path],
+    filename: str,
+    list_message_cls: Callable[[], ListMessage],
+    lists_message_cls: Callable[[], object],
+    lists_field_name: str,
+) -> object:
+    """Generic merge for one proto type: reads filename out of every task
+    directory that has it (missing files -- a task that hasn't reached
+    this step yet, or was run with --keep-<x> pointed elsewhere -- are
+    skipped, not an error, matching local_ssa_post_processing.py's own
+    "skip missing .root files" precedent) and gathers each one, as-is,
+    into lists_message_cls's own repeated lists_field_name.
+    """
+    merged = lists_message_cls()
+    field = getattr(merged, lists_field_name)
+    n_missing = 0
+    for d in task_dirs:
+        p = d / filename
+        if not p.is_file():
+            n_missing += 1
+            continue
+        field.append(_read_proto_zst(list_message_cls, p))
+    if n_missing:
+        logger.warning("%d of %d task dir(s) missing %s; skipped", n_missing, len(task_dirs), filename)
+    return merged
+
+
+def merge_bands(task_dirs: list[Path]) -> band_pb2.BandLists:
+    return _merge_one_type(task_dirs, BANDS_PROTO_FILENAME, band_pb2.BandList, band_pb2.BandLists, "band_lists")
+
+
+def merge_dmtracks(task_dirs: list[Path]) -> dmtrack_pb2.DMTrackLists:
+    return _merge_one_type(
+        task_dirs, DMTRACKS_PROTO_FILENAME, dmtrack_pb2.DMTrackList, dmtrack_pb2.DMTrackLists, "dmtrack_lists"
+    )
+
+
+def merge_tracks(task_dirs: list[Path]) -> track_pb2.TrackLists:
+    return _merge_one_type(task_dirs, TRACKS_PROTO_FILENAME, track_pb2.TrackList, track_pb2.TrackLists, "track_lists")
+
+
+def run_stage2_merge(runs_dir: Path, run_name: str) -> None:
+    """The actual stage-2 step: merges bands/dmtracks/tracks for one run
+    and writes each to runs_dir/run_name/<same filename as the per-task
+    one>, sibling to that run's own subrun_*/ directories (per direct
+    instruction on the output path convention).
+    """
+    task_dirs = find_task_dirs(runs_dir, run_name)
+    if not task_dirs:
+        raise RuntimeError(f"No stage-1 task directories found under {runs_dir / run_name}/subrun_*/field_*")
+    logger.info("stage2 merge: found %d task dir(s) under %s", len(task_dirs), runs_dir / run_name)
+
+    run_dir = runs_dir / run_name
+
+    merged_bands = merge_bands(task_dirs)
+    _write_proto_zst(merged_bands, run_dir / BANDS_PROTO_FILENAME)
+    logger.info("wrote %s: %d task(s) merged", run_dir / BANDS_PROTO_FILENAME, len(merged_bands.band_lists))
+
+    merged_dmtracks = merge_dmtracks(task_dirs)
+    _write_proto_zst(merged_dmtracks, run_dir / DMTRACKS_PROTO_FILENAME)
+    logger.info(
+        "wrote %s: %d task(s) merged", run_dir / DMTRACKS_PROTO_FILENAME, len(merged_dmtracks.dmtrack_lists)
+    )
+
+    merged_tracks = merge_tracks(task_dirs)
+    _write_proto_zst(merged_tracks, run_dir / TRACKS_PROTO_FILENAME)
+    logger.info("wrote %s: %d task(s) merged", run_dir / TRACKS_PROTO_FILENAME, len(merged_tracks.track_lists))

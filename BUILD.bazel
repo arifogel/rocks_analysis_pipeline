@@ -161,6 +161,27 @@ py_binary(
     ],
 )
 
+py_library(
+    name = "stage2_merge_lib",
+    srcs = ["stage2_merge.py"],
+    deps = [
+        ":stage1_steps_lib",
+        "//api/v1:band_py_pb2",
+        "//api/v1:dmtrack_py_pb2",
+        "//api/v1:track_py_pb2",
+    ],
+)
+
+py_binary(
+    name = "stage2_merge_task",
+    srcs = [":stage2_merge_task.py"],
+    main = ":stage2_merge_task.py",
+    deps = [
+        ":logging_setup_lib",
+        ":stage2_merge_lib",
+    ],
+)
+
 py_binary(
     name = "local_ssa",
     srcs = [":local_ssa.py"],
@@ -179,6 +200,7 @@ py_binary(
         ":logging_setup_lib",
         ":stage1_state_lib",
         ":stage1_task_lib",
+        ":stage2_merge_lib",
         "@rules_python//python/runfiles",
     ],
 )

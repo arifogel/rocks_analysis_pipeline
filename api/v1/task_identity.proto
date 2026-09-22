@@ -15,9 +15,11 @@ option go_package = "github.com/Helium6CRES/rocks_analysis_pipeline/api/v1";
 // repeating it per row would be pure waste. This is not the same problem
 // root_files.csv's own bridge table solved (see this repo's own commit
 // history): it isn't a separate manifest file to join against -- stage 2's
-// merge step just needs to read each file's own TaskIdentity once and
-// propagate it onto each row as it flattens many files together, a
-// trivial, local operation.
+// own merge step gathers each run's own *List messages as-is into a
+// *Lists wrapper (BandLists, DMTrackLists, TrackLists -- see each one's
+// own doc comment in band.proto/dmtrack.proto/track.proto), so each
+// entry's own TaskIdentity travels with it unchanged; nothing is
+// flattened, and nothing needs propagating onto individual rows.
 //
 // acquisition is deliberately absent: fixed at 0 from here onward (see
 // stage1_state.py's own module doc comment), so there is nothing to
