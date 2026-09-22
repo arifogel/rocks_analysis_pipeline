@@ -1,6 +1,8 @@
 load("@aspect_rules_py//py:defs.bzl", "py_library")
 load("@protobuf//bazel:proto_library.bzl", "proto_library")
 load("@protobuf//bazel:py_proto_library.bzl", "py_proto_library")
+load("@pypi//:requirements.bzl", "requirement")
+load("//tools:deps.bzl", "cdeps")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -95,5 +97,5 @@ py_library(
         ":point_py_pb2",
         ":slew_times_py_pb2",
         ":task_identity_py_pb2",
-    ],
+    ] + cdeps([requirement("protobuf")]),
 )
