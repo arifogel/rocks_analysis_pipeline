@@ -1,4 +1,4 @@
-load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_library")
+load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_library", "py_test")
 load("@pypi//:requirements.bzl", "requirement")
 load("//tools:deps.bzl", "cdeps", "python_ide_backport")
 
@@ -133,6 +133,17 @@ py_library(
         "//rocks_analysis_pipeline/api/v1:slew_times_py_pb2",
         "//rocks_analysis_pipeline/api/v1:task_identity_py_pb2",
         "@he6-cres-spec-sims//src/he6_cres_spec_sims",
+        "@rules_python//python/runfiles",
+    ],
+)
+
+py_test(
+    name = "stage1_steps_specsims_resolution_test",
+    srcs = [":stage1_steps_specsims_resolution_test.py"],
+    data = ["@ghcss//cmd/specsims"],
+    main = ":stage1_steps_specsims_resolution_test.py",
+    deps = [
+        ":stage1_steps_lib",
         "@rules_python//python/runfiles",
     ],
 )
