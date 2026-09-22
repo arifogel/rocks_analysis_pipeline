@@ -46,29 +46,7 @@ jobs:
       # tools/system_deps.bzl). ROOT comes from a prebuilt binary published by the ROOT team,
       # since Ubuntu does not package a usable ROOT build.
       #
-      # libtbb12 and libblas3 are not Katydid's own dependencies - they are runtime
-      # dependencies of ROOT's own prebuilt binaries and shared libraries (rootcling itself
-      # needs libtbb12; every test binary here links ROOT's shared libraries, which need
-      # libblas3), which (unlike the ROOT build installed via Homebrew on macOS) does not
-      # bundle its own copy of everything it depends on. A missing one here doesn't show up
-      # until every single test fails at runtime with a bare "Exit 127" - see the "Check a
-      # built test binary" step below, which exists specifically to catch this class of
-      # problem with a clear error message instead.
-      #
-      # This used to use a third-party action (awalsh128/cache-apt-pkgs-action) to cache these
-      # packages across runs, which computes its own cache key internally from a normalized
-      # version of the package list. In practice this produced a stale cache hit after
-      # libblas3 was added to the list below - the action's own docs state that "the default
-      # branch cache is available to other branches", a real GitHub Actions cache fallback
-      # mechanism, and the action has several open upstream issues describing exactly this
-      # class of problem (e.g. awalsh128/cache-apt-pkgs-action#138, #56). Caching just the
-      # downloaded .deb files ourselves, keyed directly on a hash of this file, avoids
-      # depending on a third party's internal cache-key computation entirely: this key is
-      # correct by construction, since it changes if and only if this file - which is the only
-      # place the package list lives - changes. `apt-get install` itself is fast and safe to
-      # run unconditionally even on a cache hit, since apt already skips re-downloading
-      # packages it finds in its local archive cache and skips reinstalling packages already
-      # at the requested version.
+      # see github.com/arifogel/katydid/tree/main/.github/workflows/ci.yaml for more information
       - name: Cache downloaded .deb files (Linux)
         if: runner.os == 'Linux'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
@@ -171,17 +149,7 @@ jobs:
       # Bazel uses to fetch Katydid's own bundled dependencies), and are not present in this
       # minimal container image by default.
       #
-      # xxhash-devel and tbb-devel are, like libtbb12 in the Ubuntu job above, not Katydid
-      # dependencies either - they are runtime dependencies of the prebuilt `rootcling` binary
-      # fetched below. freetype and gsl are the same category again, but for ROOT's own shared
-      # libraries rather than rootcling specifically: every test binary here links ROOT, which
-      # needs both at runtime (font rendering and linear algebra, respectively). A missing one
-      # here doesn't show up until every single test fails at runtime with a bare "Exit 127" -
-      # see the "Check a built test binary" step below, which exists specifically to catch this
-      # class of problem with a clear error message instead. matio-devel requires the EPEL
-      # repository; boost-devel, fftw-devel, tbb-devel, freetype, and gsl are in AlmaLinux's own
-      # default repository. CRB is enabled in case any future dependency needs it - enabling it
-      # costs nothing if unused.
+      # see github.com/arifogel/katydid/tree/main/.github/workflows/ci.yaml for more information
       - name: Install build tools and Boost/FFTW/MatIO/ROOT runtime deps (dnf)
         run: |
           dnf install -y epel-release
@@ -271,17 +239,6 @@ jobs:
 
       - name: Verify MODULE.bazel.lock is up to date and build everything
         run: bazel build --@pypi//venv=dev //...
-
-      # See the equivalent step in the Ubuntu/macOS job above for why this checks a test
-      # binary specifically, separately from the rootcling check further up.
-      - name: Check a built test binary for missing shared libraries
-        run: |
-          MISSING=$(ldd bazel-bin/Source/Executables/Validation/TestVector 2>&1 | grep "not found" || true)
-          if [ -n "$MISSING" ]; then
-            echo "Missing shared library dependencies for TestVector:"
-            echo "$MISSING"
-            exit 1
-          fi
 
       - name: Test everything
         run: bazel test --@pypi//venv=dev //...
