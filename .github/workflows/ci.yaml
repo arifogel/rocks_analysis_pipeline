@@ -165,9 +165,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Configure git for private repo access
-        run: git config --global url."https://${{ secrets.READ_PRIVATE_CRES_REPOS }}@github.com/".insteadOf "https://github.com/"
-
       # AlmaLinux is a RHEL-family Linux distribution, using dnf (and the EPEL and CRB add-on
       # repositories) rather than apt. gcc-c++ and git are not Katydid dependencies as such -
       # they are needed for Bazel itself to work at all (a C++ compiler, and the `git` command
@@ -201,6 +198,9 @@ jobs:
             xxhash-devel \
             freetype \
             gsl
+
+      - name: Configure git for private repo access
+        run: git config --global url."https://${{ secrets.READ_PRIVATE_CRES_REPOS }}@github.com/".insteadOf "https://github.com/"
 
       # keepcache=True above is needed for this cache to actually help: dnf deletes downloaded
       # packages after a successful install by default.
