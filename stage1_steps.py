@@ -42,8 +42,8 @@ logger = logging.getLogger(__name__)
 SPECSIMS_RLOCATION = "ghcss+/cmd/specsims/specsims_/specsims"  # matches local_spec_sims.py's own constant
 KATYDID_RLOCATION = "katydid+/Source/Executables/Main/Katydid"  # matches local_ssa_katydid.py's own constant
 
-LOG_FILENAME = "specsims.log"
-COMPRESSED_LOG_FILENAME = LOG_FILENAME + ".zst"
+SPECSIMS_LOG_FILENAME = "specsims.log"
+COMPRESSED_SPECSIMS_LOG_FILENAME = SPECSIMS_LOG_FILENAME + ".zst"
 
 # specsims's own config and output layout within task_dir. Named
 # "specsims.yaml" (not e.g. "config.yaml") specifically so
@@ -59,6 +59,7 @@ DMTRACKS_CSV_FILENAME = "dmtracks.csv"
 ROOT_FILENAME = "track.root"
 SLEW_TIMES_FILENAME = "slew_times.txt"
 KATYDID_LOG_FILENAME = "katydid.log"
+COMPRESSED_KATYDID_LOG_FILENAME = KATYDID_LOG_FILENAME + ".zst"
 
 # This module's own proto+zstd output layout within task_dir.
 BANDS_PROTO_FILENAME = "bands.pb.zst"
@@ -76,9 +77,9 @@ SLEW_TIMES_PROTO_FILENAME = "slew_times.pb.zst"
 MB_EVENTS_TREE_NAME = "MB-events"
 
 
-def compress_log(task_dir: Path) -> None:
-    """Compresses task_dir's log file to <LOG_FILENAME>.zst, leaving the
-    original in place (deletion is a separate step -- see
+def _compress_log(task_dir: Path, log_filename: str, compressed_filename: str) -> None:
+    """Compresses task_dir/log_filename to task_dir/compressed_filename,
+    leaving the original in place (deletion is a separate step -- see
     stage1_state.py's own reasoning on why). Real, measured payoff, not a
     guess: this project's own local_spec_sims.log compressed
     4,871,860 -> 100,590 bytes (48.4x) in one real run, log text being far
@@ -91,27 +92,52 @@ def compress_log(task_dir: Path) -> None:
     across every node of an HPC cluster (AlmaLinux 9's own default/minimal
     install doesn't appear to include it based on the available evidence,
     though this wasn't confirmed against official documentation).
+
+    Generic over which log (shared by compress_specsims_log/
+    compress_katydid_log below): the logic is identical for both, only the
+    filenames differ, and specsims's own log-compression is deliberately
+    not gated on Katydid's (they're independent lifecycles, gated on
+    specsims_done and katydid_done respectively -- see STEPS's own order).
     """
-    log_path = task_dir / LOG_FILENAME
-    compressed_path = task_dir / COMPRESSED_LOG_FILENAME
+    log_path = task_dir / log_filename
+    compressed_path = task_dir / compressed_filename
     with open(log_path, "rb") as f_in, zstd.open(compressed_path, "wb") as f_out:
         shutil.copyfileobj(f_in, f_out)
     logger.info(
-        "log_compressed: %d -> %d bytes (%.1fx)",
+        "%s compressed: %d -> %d bytes (%.1fx)",
+        log_filename,
         log_path.stat().st_size,
         compressed_path.stat().st_size,
         log_path.stat().st_size / max(compressed_path.stat().st_size, 1),
     )
 
 
-def delete_uncompressed_log(task_dir: Path) -> None:
-    """Deletes the uncompressed log. Only ever runs after compress_log in
-    STEPS's own fixed order, so the compressed copy is guaranteed to exist
-    already. missing_ok=True: deleting an already-deleted file (e.g. this
-    step re-running after a crash between the delete and its own checkpoint
-    being recorded) is expected to be harmless, not an error.
+def _delete_uncompressed_log(task_dir: Path, log_filename: str) -> None:
+    """Deletes the uncompressed log. Only ever runs after the matching
+    _compress_log call in STEPS's own fixed order, so the compressed copy
+    is guaranteed to exist already. missing_ok=True: deleting an
+    already-deleted file (e.g. this step re-running after a crash between
+    the delete and its own checkpoint being recorded) is expected to be
+    harmless, not an error.
     """
-    (task_dir / LOG_FILENAME).unlink(missing_ok=True)
+    (task_dir / log_filename).unlink(missing_ok=True)
+    logger.info("%s (uncompressed) deleted", log_filename)
+
+
+def compress_specsims_log(task_dir: Path) -> None:
+    _compress_log(task_dir, SPECSIMS_LOG_FILENAME, COMPRESSED_SPECSIMS_LOG_FILENAME)
+
+
+def delete_uncompressed_specsims_log(task_dir: Path) -> None:
+    _delete_uncompressed_log(task_dir, SPECSIMS_LOG_FILENAME)
+
+
+def compress_katydid_log(task_dir: Path) -> None:
+    _compress_log(task_dir, KATYDID_LOG_FILENAME, COMPRESSED_KATYDID_LOG_FILENAME)
+
+
+def delete_uncompressed_katydid_log(task_dir: Path) -> None:
+    _delete_uncompressed_log(task_dir, KATYDID_LOG_FILENAME)
 
 
 def _task_identity(task_dir: Path) -> task_identity_pb2.TaskIdentity:
@@ -191,7 +217,7 @@ def run_dmtracks_proto_conversion(task_dir: Path) -> None:
 def delete_mc_truth(task_dir: Path) -> None:
     """Deletes bands.csv and dmtracks.csv. Only ever runs after both
     bands_proto_done and dmtracks_proto_done in STEPS's own fixed order.
-    missing_ok=True for the same reason as delete_uncompressed_log."""
+    missing_ok=True for the same reason as _delete_uncompressed_log."""
     (task_dir / SPECSIMS_OUTPUT_DIRNAME / BANDS_CSV_FILENAME).unlink(missing_ok=True)
     (task_dir / SPECSIMS_OUTPUT_DIRNAME / DMTRACKS_CSV_FILENAME).unlink(missing_ok=True)
     logger.info("mc_truth_deleted: bands.csv, dmtracks.csv")
@@ -401,7 +427,7 @@ def make_run_specsims(
 
     def fn(task_dir: Path) -> None:
         config_path = render_specsims_config(task_dir, yaml_config, json_config, initial_seed, noise_paths)
-        log_path = task_dir / LOG_FILENAME
+        log_path = task_dir / SPECSIMS_LOG_FILENAME
         logger.info("specsims starting (use_ghcss=%s), own log -> %s", use_ghcss, log_path)
 
         if use_ghcss:
@@ -563,7 +589,7 @@ def make_run_katydid(katydid_config: str, noise_paths: list[str]) -> Callable[[P
     Katydid's own stdout/stderr (its own C++ logging -- factory
     registrations, its own welcome banner, PROG/WARN lines, etc.) is
     piped to its own log file (KATYDID_LOG_FILENAME, separate from
-    LOG_FILENAME/specsims.log -- a different step's output, and
+    SPECSIMS_LOG_FILENAME/specsims.log -- a different step's output, and
     make_run_specsims's own log file is opened in "w" mode, so sharing
     one file would risk one step's output clobbering the other's) rather
     than inherited from the parent process, the same way use_ghcss's own
@@ -711,7 +737,7 @@ def run_slew_proto_conversion(task_dir: Path) -> None:
 def delete_katydid_output(task_dir: Path) -> None:
     """Deletes track.root and slew_times.txt. Only ever runs after both
     tracks_proto_done and slew_proto_done in STEPS's own fixed order.
-    missing_ok=True for the same reason as delete_uncompressed_log."""
+    missing_ok=True for the same reason as _delete_uncompressed_log."""
     (task_dir / ROOT_FILENAME).unlink(missing_ok=True)
     (task_dir / SLEW_TIMES_FILENAME).unlink(missing_ok=True)
     logger.info("katydid_output_deleted: track.root, slew_times.txt")
@@ -731,12 +757,14 @@ def _not_implemented_without_factory(step_name: str, factory_name: str):
 # Matches stage1_state.STEPS's own order exactly -- see that module.
 STEP_FNS = {
     "specsims_done": _not_implemented_without_factory("specsims_done", "make_run_specsims"),
-    "log_compressed": compress_log,
-    "uncompressed_log_deleted": delete_uncompressed_log,
+    "specsims_log_compressed": compress_specsims_log,
+    "uncompressed_specsims_log_deleted": delete_uncompressed_specsims_log,
     "bands_proto_done": run_bands_proto_conversion,
     "dmtracks_proto_done": run_dmtracks_proto_conversion,
     "mc_truth_deleted": delete_mc_truth,
     "katydid_done": _not_implemented_without_factory("katydid_done", "make_run_katydid"),
+    "katydid_log_compressed": compress_katydid_log,
+    "uncompressed_katydid_log_deleted": delete_uncompressed_katydid_log,
     "specsims_output_deleted": delete_specsims_output,
     "tracks_proto_done": run_tracks_proto_conversion,
     "slew_proto_done": run_slew_proto_conversion,

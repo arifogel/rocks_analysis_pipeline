@@ -40,7 +40,8 @@ from stage1_state import (
     STEP_KATYDID_OUTPUT_DELETED,
     STEP_MC_TRUTH_DELETED,
     STEP_SPECSIMS_OUTPUT_DELETED,
-    STEP_UNCOMPRESSED_LOG_DELETED,
+    STEP_UNCOMPRESSED_KATYDID_LOG_DELETED,
+    STEP_UNCOMPRESSED_SPECSIMS_LOG_DELETED,
     run_stage1_task,
 )
 
@@ -51,8 +52,9 @@ logger = logging.getLogger(__name__)
 # see run_stage1_task's own skip_steps parameter). One entry per delete
 # step in STEPS; production steps are never skippable this way.
 KEEP_FLAG_STEPS: dict[str, str] = {
-    "keep_uncompressed_log": STEP_UNCOMPRESSED_LOG_DELETED,
+    "keep_uncompressed_specsims_log": STEP_UNCOMPRESSED_SPECSIMS_LOG_DELETED,
     "keep_mc_truth": STEP_MC_TRUTH_DELETED,
+    "keep_uncompressed_katydid_log": STEP_UNCOMPRESSED_KATYDID_LOG_DELETED,
     "keep_specsims_output": STEP_SPECSIMS_OUTPUT_DELETED,
     "keep_katydid_output": STEP_KATYDID_OUTPUT_DELETED,
 }
@@ -127,10 +129,16 @@ def parse_args() -> argparse.Namespace:
     )
 
     arg(
-        "--keep-uncompressed-log",
-        dest="keep_uncompressed_log",
+        "--keep-uncompressed-specsims-log",
+        dest="keep_uncompressed_specsims_log",
         action="store_true",
-        help="don't delete the uncompressed log after compressing it",
+        help="don't delete the uncompressed specsims.log after compressing it",
+    )
+    arg(
+        "--keep-uncompressed-katydid-log",
+        dest="keep_uncompressed_katydid_log",
+        action="store_true",
+        help="don't delete the uncompressed katydid.log after compressing it",
     )
     arg(
         "--keep-mc-truth",

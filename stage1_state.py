@@ -50,8 +50,8 @@ from checkpoints import is_checkpointed, run_checkpointed
 # The one flat, ordered sequence of steps for a stage-1 task. Order here is
 # the order they run in; there is no other structure.
 STEP_SPECSIMS_DONE = "specsims_done"
-STEP_LOG_COMPRESSED = "log_compressed"
-STEP_UNCOMPRESSED_LOG_DELETED = "uncompressed_log_deleted"
+STEP_SPECSIMS_LOG_COMPRESSED = "specsims_log_compressed"
+STEP_UNCOMPRESSED_SPECSIMS_LOG_DELETED = "uncompressed_specsims_log_deleted"
 # bands.csv, dmtracks.csv, tracks.csv (from Katydid's .root), and
 # slew-times each get their own proto conversion step -- each is a
 # separate file today and each is (or, for slew-times, may in the future
@@ -68,6 +68,13 @@ STEP_BANDS_PROTO_DONE = "bands_proto_done"
 STEP_DMTRACKS_PROTO_DONE = "dmtracks_proto_done"
 STEP_MC_TRUTH_DELETED = "mc_truth_deleted"  # bands.csv + dmtracks.csv, no longer needed once converted
 STEP_KATYDID_DONE = "katydid_done"
+# Katydid's own log gets the same compress-then-delete-uncompressed
+# treatment as specsims's own (renamed above for symmetry, now that
+# there are two independent logs) -- entirely independent of it, gated
+# on katydid_done rather than specsims_done, since katydid.log doesn't
+# exist until Katydid has actually run.
+STEP_KATYDID_LOG_COMPRESSED = "katydid_log_compressed"
+STEP_UNCOMPRESSED_KATYDID_LOG_DELETED = "uncompressed_katydid_log_deleted"
 STEP_SPECSIMS_OUTPUT_DELETED = "specsims_output_deleted"  # .speck files, no longer needed once Katydid has consumed them
 STEP_TRACKS_PROTO_DONE = "tracks_proto_done"  # .root -> proto
 STEP_SLEW_PROTO_DONE = "slew_proto_done"  # slew-times -> proto
@@ -75,12 +82,14 @@ STEP_KATYDID_OUTPUT_DELETED = "katydid_output_deleted"  # .root + slew-times, no
 
 STEPS: list[str] = [
     STEP_SPECSIMS_DONE,
-    STEP_LOG_COMPRESSED,
-    STEP_UNCOMPRESSED_LOG_DELETED,
+    STEP_SPECSIMS_LOG_COMPRESSED,
+    STEP_UNCOMPRESSED_SPECSIMS_LOG_DELETED,
     STEP_BANDS_PROTO_DONE,
     STEP_DMTRACKS_PROTO_DONE,
     STEP_MC_TRUTH_DELETED,
     STEP_KATYDID_DONE,
+    STEP_KATYDID_LOG_COMPRESSED,
+    STEP_UNCOMPRESSED_KATYDID_LOG_DELETED,
     STEP_SPECSIMS_OUTPUT_DELETED,
     STEP_TRACKS_PROTO_DONE,
     STEP_SLEW_PROTO_DONE,
