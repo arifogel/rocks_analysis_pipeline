@@ -1,0 +1,62 @@
+module(
+    name = "rocks-analysis-pipeline",
+    version = "0.1.0",
+)
+
+PYTHON_VERSION = "3.14"
+
+bazel_dep(name = "rules_python", version = "2.3.4")
+
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.toolchain(
+    is_default = True,
+    python_version = PYTHON_VERSION,
+)
+
+bazel_dep(name = "rules_shell", version = "0.8.0")
+bazel_dep(name = "aspect_rules_py", version = "1.12.1")
+bazel_dep(name = "protobuf", version = "36.2")
+bazel_dep(name = "he6-cres-spec-sims", version = "0.2.0")
+git_override(
+    module_name = "he6-cres-spec-sims",
+    commit = "a4061334b1513fd8ea51125335fd42fdb36fda74",  # main, as of 2026-09-22: "Validate renovate.json and try known good change (#6)"
+    remote = "https://github.com/arifogel/he6-cres-spec-sims.git",
+)
+
+bazel_dep(name = "katydid", version = "0.1.0")
+git_override(
+    module_name = "katydid",
+    commit = "8460adada2b7180f2fc39a23cb2aa09cb21358ed",  # main, as of 2026-09-22: "Update dependency rules_cc to v0.2.25 (#27)"
+    remote = "https://github.com/arifogel/katydid.git",
+)
+
+bazel_dep(name = "ghcss", version = "0.1.0")
+git_override(
+    module_name = "ghcss",
+    commit = "d53d21cafac02373e6044d9d588dce5a7936f448",  # main, as of 2026-09-22: "port he6-cres-spec-sims (#2)"
+    remote = "https://github.com/arifogel/ghcss.git",
+)
+
+interpreters = use_extension("@aspect_rules_py//py/unstable:extension.bzl", "python_interpreters")
+interpreters.toolchain(
+    is_default = True,
+    python_version = PYTHON_VERSION,
+)
+use_repo(interpreters, "python_interpreters")
+
+register_toolchains("@python_interpreters//:all")
+
+uv = use_extension("@aspect_rules_py//uv/unstable:extension.bzl", "uv")
+uv.declare_hub(
+    hub_name = "rocks_analysis_pipeline_pypi",
+)
+uv.project(
+    hub_name = "rocks_analysis_pipeline_pypi",
+    lock = "//:uv.lock",
+    pyproject = "//:pyproject.toml",
+)
+use_repo(uv, pypi = "rocks_analysis_pipeline_pypi")
+
+uv_ext = use_extension("//tools/uv:uv_extension.bzl", "uv_ext")
+uv_ext.version(version = "0.11.21")
+use_repo(uv_ext, "uv_bin")

@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+package com.github.helium6cres.rocks_analysis_pipeline.api.v1;
+
+import "rocks_analysis_pipeline/api/v1/task_identity.proto";
+
+option go_package = "github.com/Helium6CRES/rocks_analysis_pipeline/api/v1";
+
+// DMTrack matches one row of specsims's own dmtracks.csv -- one downmixed
+// track segment, produced by DMTrackBuilder.
+//
+// Column-for-column match with the real, per-task dmtracks.csv (verified
+// against an actual uploaded file, 38 columns -- not assumed, counted
+// programmatically). The per-task file carries no identity columns of its
+// own (also verified directly) -- that's what TaskIdentity, on the
+// wrapping DMTrackList below, is for.
+//
+// track_num/event_num/beta_num/acq_num/trap_acq_num are all `double`, not
+// an integer type, despite every sample value observed ending in ".0":
+// verified against he6-cres-spec-sims's own source, not assumed from the
+// sample alone. trap_acq_num specifically comes from ExB.trap_cycle_index,
+// which computes floor division of two floats -- in Python/NumPy this
+// returns a float even though its own docstring says the result is always
+// integer-*valued* ("returns integer values >= -1"). acq_num starts as
+// np.nan in an earlier, pre-trapping intermediate representation
+// (EventBuilder's own construct_untrapped_track_df) before TrackBuilder
+// overwrites it with a real value from a dtype=int RNG draw -- but once a
+// pandas column has held NaN, pandas silently upcasts the whole column to
+// float64, which is consistent with every one of these five columns
+// printing with a trailing ".0" in the real CSV, unlike bands.csv's own
+// event/track/band columns (see band.proto), which print as plain
+// integers with no such promotion.
+message DMTrack {
+  double energy = 1;
+  double gamma = 2;
+  double end_energy = 3;
+  double initial_rho_pos = 4;
+  double initial_phi_pos = 5;
+  double initial_zpos = 6;
+  double initial_theta = 7;
+  double cos_initial_theta = 8;
+  double initial_phi_dir = 9;
+  double center_theta = 10;
+  double cos_center_theta = 11;
+  double initial_field = 12;
+  double initial_radius = 13;
+  double center_x = 14;
+  double center_y = 15;
+  double rho_center = 16;
+  double trapped_initial_theta = 17;
+  double max_radius = 18;
+  double min_radius = 19;
+  double b_avg = 20;
+  double start_freq = 21;
+  double end_freq = 22;
+  double start_time = 23;
+  double end_time = 24;
+  double start_time_in_trap_acq = 25;
+  double end_time_in_trap_acq = 26;
+  double zmax = 27;
+  double axial_freq = 28;
+  double grad_b_freq = 29;
+  double mod_index = 30;
+  double track_power = 31;
+  double slope = 32;
+  double track_length = 33;
+  double track_num = 34;
+  double event_num = 35;
+  double beta_num = 36;
+  double acq_num = 37;
+  double trap_acq_num = 38;
+}
+
+// DMTrackList is stage 1's own dmtracks_proto_done output: every DMTrack
+// row from one task's dmtracks.csv, plus the TaskIdentity every one of
+// those rows shares (see task_identity.proto's own doc comment for why it
+// lives here and not on each DMTrack).
+message DMTrackList {
+  TaskIdentity task = 1;
+  repeated DMTrack dmtracks = 2;
+}
+
+// DMTrackLists is stage 2's own merge-step output: every task's own
+// DMTrackList for one run, gathered as-is (not flattened -- see
+// BandLists's own doc comment in band.proto for the full reasoning,
+// identical here).
+message DMTrackLists {
+  repeated DMTrackList dmtrack_lists = 1;
+}

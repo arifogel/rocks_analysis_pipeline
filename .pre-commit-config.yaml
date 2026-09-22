@@ -1,0 +1,54 @@
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+repos:
+  - repo: https://github.com/keith/pre-commit-buildifier
+    rev: ec25c1dca1a4a74c0efaa48052b4ea99a9ac19d7 # frozen: 8.5.1.3
+    hooks:
+      - id: buildifier
+        args: ["-lint=fix"]
+      - id: buildifier-lint
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: 2700fd5671c633760d912769c041bfcde2b9a01b # frozen: v0.15.22
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+        files: &arifogel |
+          (?x)^(
+            local.*.py
+          )$
+      - id: ruff-format
+        files: *arifogel
+  - repo: https://github.com/thibaudcolas/pre-commit-stylelint
+    rev: c04e74b560392d1602e683cfacff9ad134738f49 # frozen: v17.14.1
+    hooks:
+      - id: stylelint
+        args: [--fix]
+        additional_dependencies:
+          - stylelint@^16.2.0
+          - stylelint-config-standard@^36.0.0
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: f12edd9c7be1c20cfa42420fd0e6df71e42b51ea # frozen: v4.0.0-alpha.8
+    hooks:
+      - id: prettier
+        types_or: [css, javascript, html]
+        args: ["--ignore-path=/dev/null"]
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: f12edd9c7be1c20cfa42420fd0e6df71e42b51ea # frozen: v4.0.0-alpha.8
+    hooks:
+      - id: prettier
+        files: \.(yaml|yml)$
+        args: ["--ignore-path=/dev/null"]
+  - repo: https://github.com/djlint/djLint
+    rev: d69c3510ebf3e850e0fa00cb998f83bfc6f87c88 # frozen: v1.42.1
+    hooks:
+      - id: djlint-reformat
+        types_or: [jinja, html]
+        files: \.(jinja|jinja2|html\.jinja)$
+      - id: djlint
+        types_or: [jinja, html]
+        files: \.(jinja|jinja2|html\.jinja)$
+  - repo: https://github.com/renovatebot/pre-commit-hooks
+    rev: 470fe6459fc7c36edb8160e6957a1b96200b94dd # frozen: 44.5.1
+    hooks:
+      - id: renovate-config-validator
+        files: '^renovate\.json$'

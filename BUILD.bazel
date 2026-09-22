@@ -1,0 +1,9 @@
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
+
+sh_binary(
+    name = "uv",
+    srcs = ["//tools/uv:uv_wrapper.sh"],
+    args = ["$(location @uv_bin//:uv)"],
+    data = ["@uv_bin//:uv"],
+    visibility = ["//visibility:private"],
+)

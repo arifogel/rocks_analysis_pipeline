@@ -1,0 +1,221 @@
+load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_library", "py_test")
+load("@pypi//:requirements.bzl", "requirement")
+load("//tools:deps.bzl", "cdeps", "python_ide_backport")
+
+py_binary(
+    name = "sbatch_spec_sims",
+    srcs = [":sbatch_spec_sims.py"],
+    main = ":sbatch_spec_sims.py",
+    deps = cdeps([
+        requirement("argparse"),
+        requirement("awkward-pandas"),
+        requirement("pandas"),
+        requirement("psycopg2-binary"),
+        requirement("pytz"),
+        requirement("pyyaml"),
+        requirement("scikit-learn"),
+        requirement("uproot"),
+    ]),
+)
+
+py_library(
+    name = "rocks_utility_lib",
+    srcs = ["rocks_utility.py"],
+    deps = cdeps([
+        requirement("argparse"),
+        requirement("awkward-pandas"),
+        requirement("pandas"),
+        requirement("psycopg2-binary"),
+        requirement("pytz"),
+        requirement("pyyaml"),
+        requirement("scikit-learn"),
+        requirement("uproot"),
+    ]) + ["@he6-cres-spec-sims//src/he6_cres_spec_sims"],
+)
+
+py_binary(
+    name = "run_spec_sims",
+    srcs = [":run_spec_sims.py"],
+    main = ":run_spec_sims.py",
+    deps = [":rocks_utility_lib"],
+)
+
+py_library(
+    name = "logging_setup_lib",
+    srcs = ["logging_setup.py"],
+)
+
+py_binary(
+    name = "local_spec_sims",
+    srcs = [
+        ":local_spec_sims.py",
+        ":run_spec_sims_ghcss.py",
+    ],
+    data = ["@ghcss//cmd/specsims"],
+    main = ":local_spec_sims.py",
+    deps = cdeps([
+        requirement("numpy"),
+        requirement("pyyaml"),
+    ]) + [
+        ":logging_setup_lib",
+        "@rules_python//python/runfiles",
+    ],
+)
+
+py_binary(
+    name = "local_ssa_katydid",
+    srcs = [":local_ssa_katydid.py"],
+    data = ["@katydid//Source/Executables/Main:Katydid"],
+    main = ":local_ssa_katydid.py",
+    deps = [
+        ":rocks_utility_lib",
+        "@rules_python//python/runfiles",
+    ],
+)
+
+py_binary(
+    name = "local_ssa_post_processing",
+    srcs = [
+        ":local_ssa_katydid.py",
+        ":local_ssa_post_processing.py",
+    ],
+    main = ":local_ssa_post_processing.py",
+    deps = [
+        ":rocks_utility_lib",
+        "@rules_python//python/runfiles",
+    ],
+)
+
+py_library(
+    name = "checkpoints_lib",
+    srcs = ["checkpoints.py"],
+)
+
+py_library(
+    name = "stage1_state_lib",
+    srcs = ["stage1_state.py"],
+    deps = [":checkpoints_lib"],
+)
+
+py_library(
+    name = "noise_paths_lib",
+    srcs = ["noise_paths.py"],
+    deps = cdeps([
+        requirement("pandas"),
+    ]) + [
+        ":rocks_utility_lib",
+    ],
+)
+
+py_binary(
+    name = "print_noise_paths",
+    srcs = [":print_noise_paths.py"],
+    main = ":print_noise_paths.py",
+    deps = [":noise_paths_lib"],
+)
+
+py_library(
+    name = "stage1_steps_lib",
+    srcs = ["stage1_steps.py"],
+    deps = cdeps([
+        requirement("numpy"),
+        requirement("pandas"),
+        requirement("pyyaml"),
+        requirement("uproot"),
+    ]) + [
+        ":logging_setup_lib",
+        ":noise_paths_lib",
+        ":stage1_state_lib",
+        "//rocks_analysis_pipeline/api/v1:band_py_pb2",
+        "//rocks_analysis_pipeline/api/v1:dmtrack_py_pb2",
+        "//rocks_analysis_pipeline/api/v1:event_py_pb2",
+        "//rocks_analysis_pipeline/api/v1:point_py_pb2",
+        "//rocks_analysis_pipeline/api/v1:slew_times_py_pb2",
+        "//rocks_analysis_pipeline/api/v1:task_identity_py_pb2",
+        "@he6-cres-spec-sims//src/he6_cres_spec_sims",
+        "@rules_python//python/runfiles",
+    ],
+)
+
+py_test(
+    name = "stage1_steps_specsims_resolution_test",
+    srcs = [":stage1_steps_specsims_resolution_test.py"],
+    data = ["@ghcss//cmd/specsims"],
+    main = ":stage1_steps_specsims_resolution_test.py",
+    deps = [
+        ":stage1_steps_lib",
+        "@rules_python//python/runfiles",
+    ],
+)
+
+py_library(
+    name = "stage1_task_lib",
+    srcs = ["stage1_task.py"],
+    deps = [
+        ":noise_paths_lib",
+        ":stage1_state_lib",
+        ":stage1_steps_lib",
+    ],
+)
+
+py_binary(
+    name = "stage1_task",
+    srcs = [":stage1_task.py"],
+    data = [
+        "@ghcss//cmd/specsims",
+        "@katydid//Source/Executables/Main:Katydid",
+    ],
+    main = ":stage1_task.py",
+    deps = [
+        ":noise_paths_lib",
+        ":stage1_state_lib",
+        ":stage1_steps_lib",
+    ],
+)
+
+py_library(
+    name = "stage2_merge_lib",
+    srcs = ["stage2_merge.py"],
+    deps = [
+        ":stage1_steps_lib",
+        "//rocks_analysis_pipeline/api/v1:band_py_pb2",
+        "//rocks_analysis_pipeline/api/v1:dmtrack_py_pb2",
+        "//rocks_analysis_pipeline/api/v1:event_py_pb2",
+        "//rocks_analysis_pipeline/api/v1:point_py_pb2",
+    ],
+)
+
+py_binary(
+    name = "stage2_merge_task",
+    srcs = [":stage2_merge_task.py"],
+    main = ":stage2_merge_task.py",
+    deps = [
+        ":logging_setup_lib",
+        ":stage2_merge_lib",
+    ],
+)
+
+py_binary(
+    name = "local_ssa",
+    srcs = [":local_ssa.py"],
+    # stage1_task's own go-binary data deps (specsims/Katydid), needed
+    # directly here: local_ssa invokes stage1_task in-venv via
+    # `sys.executable -m stage1_task` (see local_ssa.py's own docstring
+    # for the full reasoning), not stage1_task's own py_binary as a
+    # subprocess, so nothing bundles these in transitively the way a data
+    # dependency on that py_binary used to.
+    data = [
+        "@ghcss//cmd/specsims",
+        "@katydid//Source/Executables/Main:Katydid",
+    ],
+    main = ":local_ssa.py",
+    deps = [
+        ":logging_setup_lib",
+        ":stage1_state_lib",
+        ":stage1_task_lib",
+        ":stage2_merge_lib",
+        "@rules_python//python/runfiles",
+    ],
+)
+
+python_ide_backport()
