@@ -12,7 +12,10 @@ the pattern is meant to be reused (or closely ported) once wulf is back up,
 not something specific to local execution.
 """
 
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def checkpoint_path(task_dir: Path, step_name: str) -> Path:
@@ -55,6 +58,7 @@ def run_checkpointed(task_dir: Path, step_name: str, fn) -> None:
     rename, or being safely re-runnable from scratch on its own).
     """
     if is_checkpointed(task_dir, step_name):
+        logger.info("skipping %s: already checkpointed", step_name)
         return
     fn()
     mark_checkpoint(task_dir, step_name)
