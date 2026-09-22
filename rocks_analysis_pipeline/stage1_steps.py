@@ -33,9 +33,9 @@ import uproot
 import yaml
 from python.runfiles import runfiles
 
-from api.v1 import band_pb2, dmtrack_pb2, event_pb2, point_pb2, slew_times_pb2, task_identity_pb2
-from logging_setup import base_fmt
-from stage1_state import parse_task_dir
+from rocks_analysis_pipeline.api.v1 import band_pb2, dmtrack_pb2, event_pb2, point_pb2, slew_times_pb2, task_identity_pb2
+from rocks_analysis_pipeline.logging_setup import base_fmt
+from rocks_analysis_pipeline.stage1_state import parse_task_dir
 
 logger = logging.getLogger(__name__)
 

@@ -11,7 +11,7 @@ import sys
 import subprocess as sp
 import json
 
-from rocks_utility import (
+from rocks_analysis_pipeline.rocks_utility import (
     he6cres_db_query,
     get_pst_time,
     set_permissions,

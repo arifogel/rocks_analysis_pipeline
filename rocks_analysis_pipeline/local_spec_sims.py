@@ -67,8 +67,8 @@ from typing import Any  # noqa: E402
 
 from python.runfiles import runfiles  # noqa: E402
 
-from logging_setup import init_logging  # noqa: E402
-from run_spec_sims_ghcss import RunSpecSimsGhcss  # noqa: E402
+from rocks_analysis_pipeline.logging_setup import init_logging  # noqa: E402
+from rocks_analysis_pipeline.run_spec_sims_ghcss import RunSpecSimsGhcss  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

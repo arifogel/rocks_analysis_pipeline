@@ -34,10 +34,10 @@ import argparse
 import logging
 from pathlib import Path
 
-import stage1_steps
-from logging_setup import init_logging
-from noise_paths import resolve_noise_paths_from_id
-from stage1_state import (
+from rocks_analysis_pipeline import stage1_steps
+from rocks_analysis_pipeline.logging_setup import init_logging
+from rocks_analysis_pipeline.noise_paths import resolve_noise_paths_from_id
+from rocks_analysis_pipeline.stage1_state import (
     STEP_KATYDID_OUTPUT_DELETED,
     STEP_MC_TRUTH_DELETED,
     STEP_SPECSIMS_OUTPUT_DELETED,

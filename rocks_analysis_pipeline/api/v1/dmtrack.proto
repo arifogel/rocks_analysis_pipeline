@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package com.github.helium6cres.rocks_analysis_pipeline.api.v1;
 
-import "api/v1/task_identity.proto";
+import "rocks_analysis_pipeline/api/v1/task_identity.proto";
 
 option go_package = "github.com/Helium6CRES/rocks_analysis_pipeline/api/v1";
 

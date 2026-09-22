@@ -12,7 +12,7 @@ Example:
 
 import argparse
 
-from noise_paths import resolve_noise_paths_from_id
+from rocks_analysis_pipeline.noise_paths import resolve_noise_paths_from_id
 
 
 def parse_args() -> argparse.Namespace:

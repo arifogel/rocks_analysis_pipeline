@@ -37,8 +37,8 @@ from typing import Callable, TypeVar
 
 import compression.zstd as zstd
 
-from api.v1 import band_pb2, dmtrack_pb2, event_pb2, point_pb2
-from stage1_steps import (
+from rocks_analysis_pipeline.api.v1 import band_pb2, dmtrack_pb2, event_pb2, point_pb2
+from rocks_analysis_pipeline.stage1_steps import (
     BANDS_PROTO_FILENAME,
     DMTRACKS_PROTO_FILENAME,
     EVENTS_PROTO_FILENAME,

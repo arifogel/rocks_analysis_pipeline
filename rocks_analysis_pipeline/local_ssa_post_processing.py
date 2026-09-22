@@ -61,7 +61,7 @@ import pandas as pd
 # BUILD.bazel: this target includes local_ssa_katydid.py in its own srcs,
 # the same pattern local_spec_sims.py already uses for run_spec_sims.py),
 # rather than re-deriving its path convention independently.
-from local_ssa_katydid import build_file_df
+from rocks_analysis_pipeline.local_ssa_katydid import build_file_df
 
 
 def parse_args() -> argparse.Namespace:

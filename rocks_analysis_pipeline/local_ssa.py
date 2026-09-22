@@ -22,10 +22,10 @@ CPU-bound in this process), matching cresproc/model.py's own reasoning for
 using threads over processes for comparable I/O-bound work.
 
 Each task's own subprocess is this process's own sys.executable, running
-`-m stage1_task` -- not stage1_task's own bazel-generated py_binary
-launcher, and not a resolved path to stage1_task.py's own source file.
-Two earlier, wrong approaches got as far as being committed before this
-one, both real bugs, not refinements:
+`-m rocks_analysis_pipeline.stage1_task` -- not stage1_task's own
+bazel-generated py_binary launcher, and not a resolved path to
+stage1_task.py's own source file. Two earlier, wrong approaches got as
+far as being committed before this one, both real bugs, not refinements:
 
 First: invoking stage1_task's own py_binary launcher directly, once per
 task. That launcher creates and manages its own separate, per-binary venv
@@ -110,9 +110,9 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-from logging_setup import base_fmt, init_logging
-from stage1_state import task_dir
-from stage2_merge import run_stage2_merge
+from rocks_analysis_pipeline.logging_setup import base_fmt, init_logging
+from rocks_analysis_pipeline.stage1_state import task_dir
+from rocks_analysis_pipeline.stage2_merge import run_stage2_merge
 
 logger = logging.getLogger(__name__)
 
@@ -240,16 +240,17 @@ def build_jobs(args: argparse.Namespace) -> list[dict[str, Any]]:
 
 def build_task_command(args: argparse.Namespace, job: dict[str, Any]) -> list[str]:
     """Builds the stage1_task command line for one task: this process's own
-    sys.executable running `-m stage1_task` -- see this module's own
-    docstring for why this, and not stage1_task's own py_binary launcher
-    or a resolved path to its source file, is correct. Split out from
+    sys.executable running `-m rocks_analysis_pipeline.stage1_task` -- see
+    this module's own docstring for why this, and not stage1_task's own
+    py_binary launcher or a resolved path to its source file, is correct.
+    Split out from
     _run_one_task so this half -- the part with real, checkable logic --
     is directly testable without actually invoking anything.
     """
     command = [
         sys.executable,
         "-m",
-        "stage1_task",
+        "rocks_analysis_pipeline.stage1_task",
         f"--runs-dir={args.runs_dir}",
         f"--run-name={args.run_name}",
         f"--subrun-id={job['subrun_id']}",

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from rocks_utility import he6cres_db_query
+from rocks_analysis_pipeline.rocks_utility import he6cres_db_query
 
 logger = logging.getLogger(__name__)
 

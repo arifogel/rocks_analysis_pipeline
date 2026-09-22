@@ -22,8 +22,8 @@ import argparse
 import logging
 from pathlib import Path
 
-from logging_setup import init_logging
-from stage2_merge import run_stage2_merge
+from rocks_analysis_pipeline.logging_setup import init_logging
+from rocks_analysis_pipeline.stage2_merge import run_stage2_merge
 
 logger = logging.getLogger(__name__)
 

@@ -45,7 +45,7 @@ record that this was expected, is not.
 from pathlib import Path
 from typing import Callable
 
-from checkpoints import is_checkpointed, run_checkpointed
+from rocks_analysis_pipeline.checkpoints import is_checkpointed, run_checkpointed
 
 # The one flat, ordered sequence of steps for a stage-1 task. Order here is
 # the order they run in; there is no other structure.
