@@ -333,7 +333,7 @@
     "@@he6-cres-spec-sims+//tools/uv:uv_extension.bzl%uv_ext": {
       "general": {
         "bzlTransitiveDigest": "s+Mm9i2qZZ93a0q2sgRYA4lWV9A6gQotn37ISx3jOLw=",
-        "usagesDigest": "VCi6LILlVk5AxG7/R2wrL6fMMGAsx371JzH28dQQd5w=",
+        "usagesDigest": "Vv3AoDTesdeFuqyunl9XEbqChdI6jFm+oHwUeOBhGBY=",
         "recordedInputs": [],
         "generatedRepoSpecs": {
           "uv_bin": {
