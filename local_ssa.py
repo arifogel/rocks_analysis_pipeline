@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
 Local, parallel orchestration driver for this project's ssa (spec-sims and
-analysis) pipeline -- currently stage 1 only (fans out stage1_task.py
-across every (subrun_id, field_index) task for a run, via a
-ThreadPoolExecutor, not a ProcessPoolExecutor -- see the reasoning below);
-stage 2 (the merge step, not yet designed) is meant to join this same
-orchestrator once it exists, rather than get its own separate driver.
+analysis) pipeline -- currently stage 1 only (fans out stage1_task across
+every (subrun_id, field_index) task for a run, via a ThreadPoolExecutor,
+not a ProcessPoolExecutor -- see the reasoning below); stage 2 (the merge
+step, not yet designed) is meant to join this same orchestrator once it
+exists, rather than get its own separate driver.
 
 Crash isolation is achieved by stage1_task itself running as its own fresh
 subprocess, once per task -- not by this orchestrator's own worker being a
@@ -17,36 +17,45 @@ each worker thread is mostly just waiting on a subprocess (I/O-bound, not
 CPU-bound in this process), matching cresproc/model.py's own reasoning for
 using threads over processes for comparable I/O-bound work.
 
-That subprocess is stage1_task's own venv python3 interpreter invoked
-directly against stage1_task.py's own plain source file -- not stage1_task's
-own bazel-generated launcher, and not this process's own (different) venv
-interpreter. Both wrong guesses along the way, not just one, corrected here:
+Each task's own subprocess is this process's own sys.executable, running
+`-m stage1_task` -- not stage1_task's own bazel-generated py_binary
+launcher, and not a resolved path to stage1_task.py's own source file.
+Two earlier, wrong approaches got as far as being committed before this
+one, both real bugs, not refinements:
 
-First guess: invoking stage1_task's own launcher directly, once per task.
-That launcher creates and manages its own separate, per-binary venv every
-time it runs, and a fresh runfiles tree gets created on every single
-invocation -- confirmed directly, not assumed -- so many tasks' own
-launchers racing to set up that same venv concurrently produced a real,
-reproducible crash (a different failure message each time, depending on
-exactly how two invocations collided).
+First: invoking stage1_task's own py_binary launcher directly, once per
+task. That launcher creates and manages its own separate, per-binary venv
+every time it runs, and a fresh runfiles tree gets created on every single
+invocation -- confirmed directly against a real crash, not assumed -- so
+many tasks' own launchers racing to set up that same venv concurrently
+produced a real, reproducible crash (a different failure message each
+time, depending on exactly how two invocations collided).
 
-Second guess: this process's own sys.executable, on the assumption it
-would already have everything stage1_task itself needs. Wrong: this
-process (local_ssa) doesn't depend on :stage1_steps_lib in BUILD.bazel --
-only on :stage1_task as a data dependency (which bundles its files, not
-its own package deps) -- so this process's own venv doesn't have numpy,
-uproot, he6-cres-spec-sims, etc. at all. Each aspect_rules_py venv is
-built from its own target's own deps, not from what data dependencies
-happen to bundle in.
+Second: keeping sys.executable, but resolving stage1_task.py's own source
+file via runfiles.Rlocation and warming up stage1_task's own venv exactly
+once before any tasks start, then invoking that venv's own python3
+directly against the resolved source path. This failed for a more basic
+reason: a source file's own resolved runfile is very often just a symlink
+straight back into the actual checkout, with no reliable "runfiles root"
+to derive stage1_task's own venv path by walking up from it -- confirmed
+directly against a real crash (a RuntimeError from a nonsense derived
+path), not assumed.
 
-The actual fix: stage1_task's own launcher is invoked exactly once,
-synchronously, in this process's own main(), before any tasks start --
-with no concurrency at all, this is safe, and it's what actually creates
-and populates stage1_task's own venv. Every task then invokes that now-
-stable venv's own python3 directly against the plain .py source, bypassing
-the launcher (and the venv-management logic inside it) for the rest of
-this run. See warm_up_and_resolve_stage1_task_venv_python's own doc
-comment for the full account.
+The actual fix addresses the real, underlying cause directly instead of
+working around it: this process's own venv didn't have stage1_task's own
+package deps (numpy, uproot, he6-cres-spec-sims, etc.) only because
+BUILD.bazel's own local_ssa target depended on :stage1_task as a data
+dependency (bundling its files) rather than :stage1_task_lib as a real
+deps dependency (pulling in its own package deps too) -- each
+aspect_rules_py venv is built from its own target's own deps, not from
+what a data dependency happens to bundle in. With that fixed, this
+process's own venv genuinely has everything stage1_task itself needs, so
+sys.executable is exactly the right interpreter after all, and `-m
+stage1_task` needs no resolved file path at all -- Python's own import
+machinery finds it directly, sidestepping runfiles-path-guessing
+entirely. This also means no separate venv, and no warm-up step (in-band
+or manual), is needed anywhere: there is only ever the one venv, this
+process's own, set up once by bazel's own launcher before any tasks run.
 
 Because multiple worker threads share this one process's root logger, each
 log record is tagged with which task its own thread is currently on (via a
@@ -97,31 +106,10 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-from python.runfiles import runfiles
-
 from logging_setup import base_fmt, init_logging
 from stage1_state import task_dir
 
 logger = logging.getLogger(__name__)
-
-# Matches this repo's own runfiles layout for a target defined in this same
-# workspace, confirmed directly against a real runfiles tree listing --
-# "_main" is bazel's own canonical name for the main/root repository under
-# bzlmod, regardless of MODULE.bazel's own module(name=...) declaration
-# (confirmed wrong the first time: this was "rocks-analysis-pipeline/
-# stage1_task", guessed from generic runfiles documentation rather than
-# checked against this actual repo's own tree).
-STAGE1_TASK_LAUNCHER_RLOCATION = "_main/stage1_task"
-STAGE1_TASK_PY_RLOCATION = "_main/stage1_task.py"
-
-# stage1_task's own per-binary venv (aspect_rules_py's own convention: one
-# venv per py_binary target, named ".{target_name}.venv"), created and
-# populated by stage1_task's own launcher the first time it runs -- lives
-# as a sibling of "_main" within this process's own runfiles root
-# (confirmed directly against a real runfiles tree listing: e.g.
-# local_stage1.runfiles/.local_stage1.venv, a sibling of
-# local_stage1.runfiles/_main).
-STAGE1_TASK_VENV_DIRNAME = ".stage1_task.venv"
 
 # stage1_task's own per-task log, written by stage1_task.py's own main()
 # every time it runs (a fresh process, so it calls init_logging itself --
@@ -157,96 +145,6 @@ class _TaskContextFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         record.task = _task_ctx.get()
         return True
-
-
-def resolve_stage1_task_py_path() -> str:
-    """Resolves stage1_task.py's own plain source file via runfiles. Used
-    two ways: as the actual script every task's own subprocess call runs
-    (via warm_up_and_resolve_stage1_task_venv_python's own returned venv
-    interpreter, not stage1_task's own launcher -- see that function's own
-    doc comment for why), and to locate this process's own runfiles root,
-    which stage1_task's own venv lives as a sibling within.
-    """
-    r = runfiles.Create()
-    path = r.Rlocation(STAGE1_TASK_PY_RLOCATION)
-    if path is None or not Path(path).is_file():
-        raise RuntimeError(
-            f"Could not resolve stage1_task.py via runfiles at "
-            f"'{STAGE1_TASK_PY_RLOCATION}' (got: {path}). If this repo's "
-            f"own canonical main-repository runfiles name (currently "
-            f"'_main') or stage1_task.py's own BUILD.bazel srcs have "
-            f"changed, update STAGE1_TASK_PY_RLOCATION at the top of this "
-            f"file."
-        )
-    return path
-
-
-def resolve_stage1_task_launcher_path() -> str:
-    """Resolves stage1_task's own bazel-generated (aspect_rules_py)
-    launcher via runfiles -- used exactly once, by
-    warm_up_and_resolve_stage1_task_venv_python below, to trigger that
-    launcher's own venv setup a single time before any tasks start. Never
-    invoked per-task: that's the whole fix (see this module's own doc
-    comment).
-    """
-    r = runfiles.Create()
-    path = r.Rlocation(STAGE1_TASK_LAUNCHER_RLOCATION)
-    if path is None or not Path(path).is_file():
-        raise RuntimeError(
-            f"Could not resolve stage1_task's own launcher via runfiles "
-            f"at '{STAGE1_TASK_LAUNCHER_RLOCATION}' (got: {path}). If "
-            f"this repo's own canonical main-repository runfiles name "
-            f"(currently '_main') or stage1_task's own BUILD.bazel target "
-            f"name has changed, update STAGE1_TASK_LAUNCHER_RLOCATION at "
-            f"the top of this file."
-        )
-    return path
-
-
-def warm_up_and_resolve_stage1_task_venv_python() -> str:
-    """Runs stage1_task's own launcher exactly once, synchronously, before
-    any tasks start -- this is what actually creates and populates
-    stage1_task's own venv (a separate venv from this process's own,
-    built from stage1_task's own BUILD.bazel deps, not local_ssa's --
-    local_ssa doesn't depend on :stage1_steps_lib, so its own venv
-    wouldn't have numpy/uproot/he6-cres-spec-sims/etc at all). Doing this
-    exactly once, here, with no concurrency involved at all, is what makes
-    it safe: the real, reproduced crash was many task subprocesses each
-    invoking this same launcher concurrently, every one of them trying to
-    create/recreate that one venv at the same time.
-
-    "--help" is enough to trigger the launcher's own venv setup (that
-    happens before the underlying script even starts, as part of the
-    launcher's own startup, regardless of what args reach the script) and
-    exits immediately once it has: argparse handles -h/--help before
-    checking required arguments, so this doesn't fail on stage1_task.py's
-    own required flags not being given here.
-
-    Returns the path to that now-stable venv's own python3 interpreter.
-    Every task's own subprocess call then invokes that path directly
-    against stage1_task.py's own plain source file (resolved by
-    resolve_stage1_task_py_path), bypassing the launcher -- and the
-    venv-management logic inside it -- entirely from here on.
-    """
-    launcher_path = resolve_stage1_task_launcher_path()
-    subprocess.run([launcher_path, "--help"], capture_output=True)
-
-    # stage1_task.py's own resolved path is <runfiles_root>/_main/
-    # stage1_task.py (confirmed directly against a real runfiles tree
-    # listing); the venv lives as a sibling of "_main" within that same
-    # runfiles_root.
-    runfiles_root = Path(resolve_stage1_task_py_path()).parent.parent
-    venv_python = runfiles_root / STAGE1_TASK_VENV_DIRNAME / "bin" / "python3"
-    if not venv_python.is_file():
-        raise RuntimeError(
-            f"stage1_task's own venv python3 not found at {venv_python} "
-            f"after warming it up via {launcher_path} --help. If "
-            f"aspect_rules_py's own per-binary venv directory naming "
-            f"convention (currently '.{{target_name}}.venv/bin/python3') "
-            f"has changed, update STAGE1_TASK_VENV_DIRNAME at the top of "
-            f"this file."
-        )
-    return str(venv_python)
 
 
 def parse_args() -> argparse.Namespace:
@@ -335,22 +233,18 @@ def build_jobs(args: argparse.Namespace) -> list[dict[str, Any]]:
     return jobs
 
 
-def build_task_command(
-    stage1_task_venv_python: str, stage1_task_py_path: str, args: argparse.Namespace, job: dict[str, Any]
-) -> list[str]:
-    """Builds the stage1_task command line for one task: stage1_task's own
-    (already warmed-up and stable -- see
-    warm_up_and_resolve_stage1_task_venv_python's own doc comment for why)
-    venv python3 interpreter against stage1_task.py's own plain source
-    file -- not stage1_task's own bazel-generated launcher directly, and
-    not this process's own (different) interpreter. Split out from
+def build_task_command(args: argparse.Namespace, job: dict[str, Any]) -> list[str]:
+    """Builds the stage1_task command line for one task: this process's own
+    sys.executable running `-m stage1_task` -- see this module's own
+    docstring for why this, and not stage1_task's own py_binary launcher
+    or a resolved path to its source file, is correct. Split out from
     _run_one_task so this half -- the part with real, checkable logic --
-    is directly testable without needing real paths or to actually invoke
-    anything.
+    is directly testable without actually invoking anything.
     """
     command = [
-        stage1_task_venv_python,
-        stage1_task_py_path,
+        sys.executable,
+        "-m",
+        "stage1_task",
         f"--runs-dir={args.runs_dir}",
         f"--run-name={args.run_name}",
         f"--subrun-id={job['subrun_id']}",
@@ -380,9 +274,7 @@ def build_task_command(
     return command
 
 
-def _run_one_task(
-    stage1_task_venv_python: str, stage1_task_py_path: str, args: argparse.Namespace, job: dict[str, Any]
-) -> Path:
+def _run_one_task(args: argparse.Namespace, job: dict[str, Any]) -> Path:
     """Runs a single (subrun, field) task as its own fresh subprocess --
     see this module's own docstring for why a subprocess (crash isolation)
     and why a ThreadPoolExecutor rather than a ProcessPoolExecutor is what
@@ -396,7 +288,7 @@ def _run_one_task(
         d.mkdir(parents=True, exist_ok=True)
         log_path = d / STAGE1_TASK_LOG_FILENAME
 
-        command = build_task_command(stage1_task_venv_python, stage1_task_py_path, args, job)
+        command = build_task_command(args, job)
         logger.info("starting")
         # buffering=1 (line-buffered): same reasoning as local_spec_sims.py's
         # own _run_one_job -- without it, a log file tailed mid-run can lag
@@ -429,19 +321,12 @@ def main() -> None:
             logger.info("[dry_run] subrun %s field %s", job["subrun_id"], job["field_index"])
         return
 
-    stage1_task_py_path = resolve_stage1_task_py_path()
-    logger.info("warming up stage1_task's own venv (one time, before any tasks start)")
-    stage1_task_venv_python = warm_up_and_resolve_stage1_task_venv_python()
-    logger.info("stage1_task's own venv ready: %s", stage1_task_venv_python)
-
     max_jobs = args.max_jobs
     logger.info("Running %d task(s) with max_jobs=%s", len(jobs), max_jobs or "(cpu count)")
 
     failures: list[str] = []
     with ThreadPoolExecutor(max_workers=max_jobs) as pool:
-        futures: dict[Future, dict[str, Any]] = {
-            pool.submit(_run_one_task, stage1_task_venv_python, stage1_task_py_path, args, job): job for job in jobs
-        }
+        futures: dict[Future, dict[str, Any]] = {pool.submit(_run_one_task, args, job): job for job in jobs}
         for future in as_completed(futures):
             job = futures[future]
             job_label = f"subrun {job['subrun_id']} field {job['field_index']}"

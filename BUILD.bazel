@@ -136,6 +136,16 @@ py_library(
     ],
 )
 
+py_library(
+    name = "stage1_task_lib",
+    srcs = ["stage1_task.py"],
+    deps = [
+        ":noise_paths_lib",
+        ":stage1_state_lib",
+        ":stage1_steps_lib",
+    ],
+)
+
 py_binary(
     name = "stage1_task",
     srcs = [":stage1_task.py"],
@@ -154,17 +164,21 @@ py_binary(
 py_binary(
     name = "local_ssa",
     srcs = [":local_ssa.py"],
-    # stage1_task itself, not its own transitive data deps directly:
-    # bazel bundles a py_binary's own runfiles (including *its* own data,
-    # ghcss's specsims and katydid) into any other target that depends on
-    # it, so this alone is what makes
-    # local_ssa.resolve_stage1_task_path's own runfiles.Rlocation call
-    # resolvable at all.
-    data = [":stage1_task"],
+    # stage1_task's own go-binary data deps (specsims/Katydid), needed
+    # directly here: local_ssa invokes stage1_task in-venv via
+    # `sys.executable -m stage1_task` (see local_ssa.py's own docstring
+    # for the full reasoning), not stage1_task's own py_binary as a
+    # subprocess, so nothing bundles these in transitively the way a data
+    # dependency on that py_binary used to.
+    data = [
+        "@ghcss//cmd/specsims:specsims",
+        "@katydid//Source/Executables/Main:Katydid",
+    ],
     main = ":local_ssa.py",
     deps = [
         ":logging_setup_lib",
         ":stage1_state_lib",
+        ":stage1_task_lib",
         "@rules_python//python/runfiles",
     ],
 )
