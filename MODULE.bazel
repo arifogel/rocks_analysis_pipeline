@@ -26,7 +26,7 @@ git_override(
 bazel_dep(name = "katydid", version = "0.1.0")
 git_override(
     module_name = "katydid",
-    commit = "8460adada2b7180f2fc39a23cb2aa09cb21358ed",  # main, as of 2026-09-22: "Update dependency rules_cc to v0.2.25 (#27)"
+    commit = "bfb3dcd95a84f7d9382291b1718a8c167590e26d",  # main, as of 2026-09-22: "Fix missing AlmaLinux cache key and CI comment rewrite (#28)"
     remote = "https://github.com/arifogel/katydid.git",
 )
 
