@@ -5,7 +5,7 @@ module(
 
 PYTHON_VERSION = "3.14"
 
-bazel_dep(name = "rules_python", version = "2.3.2")
+bazel_dep(name = "rules_python", version = "2.3.4")
 
 python = use_extension("@rules_python//python/extensions:python.bzl", "python")
 python.toolchain(
@@ -19,14 +19,14 @@ bazel_dep(name = "protobuf", version = "36.2")
 bazel_dep(name = "he6-cres-spec-sims", version = "0.2.0")
 git_override(
     module_name = "he6-cres-spec-sims",
-    commit = "14e6f3c5f1f0025ac49ed8dbb5f517def057720f",  # main, as of 2026-09-22: "Add renovate.json (#4)"
+    commit = "a4061334b1513fd8ea51125335fd42fdb36fda74",  # main, as of 2026-09-22: "Validate renovate.json and try known good change (#6)"
     remote = "https://github.com/arifogel/he6-cres-spec-sims.git",
 )
 
 bazel_dep(name = "katydid", version = "0.1.0")
 git_override(
     module_name = "katydid",
-    commit = "919ef217e2666234f95ccfda7bded2fb8bba0abe",  # main, as of 2026-09-22: "Update dependency platforms to v1.1.0 (#14)"
+    commit = "8460adada2b7180f2fc39a23cb2aa09cb21358ed",  # main, as of 2026-09-22: "Update dependency rules_cc to v0.2.25 (#27)"
     remote = "https://github.com/arifogel/katydid.git",
 )
 
