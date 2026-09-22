@@ -6,11 +6,14 @@ a lightweight consumer (see print_noise_paths.py) doesn't have to pull in
 any of that just to look up a couple of file paths.
 """
 
+import logging
 from pathlib import Path
 
 import pandas as pd
 
 from rocks_utility import he6cres_db_query
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_noise_paths_from_id(noise_id: int) -> list[str]:
@@ -47,6 +50,7 @@ def resolve_noise_paths_from_id(noise_id: int) -> list[str]:
         noise_id
     )
 
+    logger.info("resolving noise_id=%s via: %s", noise_id, " ".join(query_he6_db.split()))
     noise_file_df = he6cres_db_query(query_he6_db)
 
     def aggregate_paths(group):

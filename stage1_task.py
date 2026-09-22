@@ -30,9 +30,11 @@ Example:
 """
 
 import argparse
+import logging
 from pathlib import Path
 
 import stage1_steps
+from logging_setup import init_logging
 from noise_paths import resolve_noise_paths_from_id
 from stage1_state import (
     STEP_KATYDID_OUTPUT_DELETED,
@@ -41,6 +43,8 @@ from stage1_state import (
     STEP_UNCOMPRESSED_LOG_DELETED,
     run_stage1_task,
 )
+
+logger = logging.getLogger(__name__)
 
 # Maps each --keep-<x> flag's argparse dest to the one delete step it nops
 # out (both the delete action itself and that step's own checkpoint --
@@ -108,16 +112,17 @@ def parse_args() -> argparse.Namespace:
     arg(
         "--log-level",
         type=str,
-        default=None,
-        help="he6-cres-spec-sims's own package-wide log level for this run (default: INFO -- see "
-        "make_run_specsims's own doc comment for why INFO, not DEBUG)",
+        default="INFO",
+        help="root log level for this whole run (stage1_task's own messages, and everything else via "
+        "normal logging hierarchy inheritance, including he6-cres-spec-sims's own package -- see "
+        "make_run_specsims's own doc comment for why INFO, not DEBUG, matters there specifically)",
     )
     arg(
         "--log-override",
         type=str,
         default=None,
-        help="comma-separated logger_name=LEVEL overrides for individual he6-cres-spec-sims submodules, "
-        "applied on top of --log-level (e.g. 'he6_cres_spec_sims.simulation_blocks.DAQ=DEBUG') -- see "
+        help="comma-separated logger_name=LEVEL overrides for individual loggers (e.g. "
+        "'he6_cres_spec_sims.simulation_blocks.DAQ=DEBUG'), applied on top of --log-level -- see "
         "logging_setup.apply_overrides",
     )
 
@@ -196,8 +201,6 @@ def build_step_fns(args: argparse.Namespace, noise_paths: list[str]) -> dict:
         args.initial_seed,
         noise_paths,
         use_ghcss=args.use_ghcss,
-        log_level=args.log_level,
-        log_override=args.log_override,
     )
     step_fns["katydid_done"] = stage1_steps.make_run_katydid(args.katydid_config, noise_paths)
     return step_fns
@@ -205,15 +208,36 @@ def build_step_fns(args: argparse.Namespace, noise_paths: list[str]) -> dict:
 
 def main() -> None:
     args = parse_args()
+    init_logging(args.log_level, args.log_override)
+
+    logger.info(
+        "stage1_task starting: run_name=%s subrun_id=%s field_index=%s runs_dir=%s",
+        args.run_name,
+        args.subrun_id,
+        args.field_index,
+        args.runs_dir,
+    )
+
     noise_paths = resolve_noise_paths(args)
+    logger.info(
+        "resolved noise_paths=%s (via %s)",
+        noise_paths,
+        f"--noise-id={args.noise_id}" if args.noise_id is not None else "--noise-paths",
+    )
+
+    skip_steps = compute_skip_steps(args)
+    if skip_steps:
+        logger.info("skipping (--keep-*) steps: %s", sorted(skip_steps))
+
     run_stage1_task(
         Path(args.runs_dir),
         args.run_name,
         args.subrun_id,
         args.field_index,
         build_step_fns(args, noise_paths),
-        skip_steps=compute_skip_steps(args),
+        skip_steps=skip_steps,
     )
+    logger.info("stage1_task complete: run_name=%s subrun_id=%s field_index=%s", args.run_name, args.subrun_id, args.field_index)
 
 
 if __name__ == "__main__":

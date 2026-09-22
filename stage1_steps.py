@@ -34,8 +34,9 @@ import yaml
 from python.runfiles import runfiles
 
 from api.v1 import band_pb2, dmtrack_pb2, slew_times_pb2, task_identity_pb2, track_pb2
-from logging_setup import apply_overrides
 from stage1_state import parse_task_dir
+
+logger = logging.getLogger(__name__)
 
 SPECSIMS_RLOCATION = "ghcss+/cmd/specsims/specsims_/specsims"  # matches local_spec_sims.py's own constant
 KATYDID_RLOCATION = "katydid+/Source/Executables/Main/Katydid"  # matches local_ssa_katydid.py's own constant
@@ -94,6 +95,12 @@ def compress_log(task_dir: Path) -> None:
     compressed_path = task_dir / COMPRESSED_LOG_FILENAME
     with open(log_path, "rb") as f_in, zstd.open(compressed_path, "wb") as f_out:
         shutil.copyfileobj(f_in, f_out)
+    logger.info(
+        "log_compressed: %d -> %d bytes (%.1fx)",
+        log_path.stat().st_size,
+        compressed_path.stat().st_size,
+        log_path.stat().st_size / max(compressed_path.stat().st_size, 1),
+    )
 
 
 def delete_uncompressed_log(task_dir: Path) -> None:
@@ -155,6 +162,7 @@ def run_bands_proto_conversion(task_dir: Path) -> None:
         b.band = int(row.band)
 
     _write_proto_zst(band_list, task_dir / BANDS_PROTO_FILENAME)
+    logger.info("bands_proto_done: %d bands", len(band_list.bands))
 
 
 def run_dmtracks_proto_conversion(task_dir: Path) -> None:
@@ -176,6 +184,7 @@ def run_dmtracks_proto_conversion(task_dir: Path) -> None:
             setattr(d, field.name, value)
 
     _write_proto_zst(dmtrack_list, task_dir / DMTRACKS_PROTO_FILENAME)
+    logger.info("dmtracks_proto_done: %d dmtracks", len(dmtrack_list.dmtracks))
 
 
 def delete_mc_truth(task_dir: Path) -> None:
@@ -184,6 +193,7 @@ def delete_mc_truth(task_dir: Path) -> None:
     missing_ok=True for the same reason as delete_uncompressed_log."""
     (task_dir / SPECSIMS_OUTPUT_DIRNAME / BANDS_CSV_FILENAME).unlink(missing_ok=True)
     (task_dir / SPECSIMS_OUTPUT_DIRNAME / DMTRACKS_CSV_FILENAME).unlink(missing_ok=True)
+    logger.info("mc_truth_deleted: bands.csv, dmtracks.csv")
 
 
 def resolve_specsims_path() -> str:
@@ -311,6 +321,14 @@ def render_specsims_config(task_dir: Path, yaml_config: str, json_config: str, i
     config_path = task_dir / SPECSIMS_CONFIG_FILENAME
     with open(config_path, "w") as f:
         yaml.dump(yaml_dict, f, default_flow_style=False, sort_keys=False)
+    logger.info(
+        "rendered %s: field=%s trap_current=%s seed=%s noise_paths=%s",
+        config_path,
+        field,
+        trap,
+        seed,
+        noise_paths,
+    )
     return config_path
 
 
@@ -320,15 +338,13 @@ def make_run_specsims(
     initial_seed: int,
     noise_paths: list[str],
     use_ghcss: bool = False,
-    log_level: str | None = None,
-    log_override: str | None = None,
 ) -> Callable[[Path], None]:
     """Builds the run_specsims step function for one stage-1 run, capturing
-    yaml_config/json_config/initial_seed/noise_paths/log_level/log_override
-    via closure -- run_stage1_task's own step_fns interface only ever
-    passes task_dir itself (see run_stage1_task's own doc comment), so
-    anything a step needs beyond that has to be captured this way rather
-    than threaded through that interface.
+    yaml_config/json_config/initial_seed/noise_paths via closure --
+    run_stage1_task's own step_fns interface only ever passes task_dir
+    itself (see run_stage1_task's own doc comment), so anything a step
+    needs beyond that has to be captured this way rather than threaded
+    through that interface.
 
     Renders this task's own specsims.yaml (see render_specsims_config's
     own doc comment), then actually runs it. Default (use_ghcss=False):
@@ -358,24 +374,24 @@ def make_run_specsims(
     propagate=False for the same scoping reason, so nothing from this
     call also reaches a root-level handler if one happens to exist.
 
-    The package logger's own level defaults to INFO (log_level=None), not
-    DEBUG: he6-cres-spec-sims's own per-chunk debug lines (see that
-    project's own commit history -- one specific line fires ~146,500
-    times per acquisition) are meant to be suppressed by default, and
-    defaulting the whole package to DEBUG would undo exactly that.
-    log_level overrides this package-wide default (matching
-    logging_setup.init_logging's own root_level shape); log_override
-    applies logging_setup.apply_overrides on top of it -- e.g.
-    "he6_cres_spec_sims.simulation_blocks.DAQ=DEBUG" to raise just that
-    one submodule back up when its detail actually is wanted, while
-    everything else stays at the package-wide default. Python resolves a
-    logger's effective level starting at the logger itself, so an
-    override on a child logger always wins over the parent's own level,
-    regardless of what either is set to or in what order. Unlike the
-    "he6_cres_spec_sims"/"py.warnings" handler setup below, log_override's
-    own effects are not saved/restored afterward: they're scoped to this
-    whole stage1_task invocation, by design, not just this one call, so
-    persisting past this function is correct, not a leftover.
+    This is the *only* logging setup this function does. Which messages
+    actually get emitted (the level, and any per-logger overrides) is
+    deliberately not this function's concern at all -- that's root-level
+    config, set once via logging_setup.init_logging in stage1_task.py's
+    own main(), not threaded through here. That's not just simpler, it's
+    correct on its own: "he6_cres_spec_sims" has no explicit level of its
+    own set anywhere in this function, so it inherits its effective level
+    from root by Python's own normal logging hierarchy rules regardless
+    of propagate=False -- propagate only controls whether an emitted
+    record also reaches an ancestor's handler, not whether the logger
+    decides to emit the record in the first place, so inheritance from
+    root still applies (verified directly against Python's own logging
+    module, not assumed). A root_level of INFO (stage1_task.py's own
+    --log-level default) is what keeps he6-cres-spec-sims's own per-chunk
+    debug lines (see that project's own commit history -- one specific
+    line fires ~146,500 times per acquisition) suppressed by default,
+    exactly as before -- just resolved through inheritance instead of a
+    redundant, separately-threaded copy of the same setting.
 
     Also bridges the warnings module (numpy/scipy's own RuntimeWarning
     etc., which bypass logging entirely by default) into the same log
@@ -385,6 +401,7 @@ def make_run_specsims(
     def fn(task_dir: Path) -> None:
         config_path = render_specsims_config(task_dir, yaml_config, json_config, initial_seed, noise_paths)
         log_path = task_dir / LOG_FILENAME
+        logger.info("specsims starting (use_ghcss=%s), own log -> %s", use_ghcss, log_path)
 
         if use_ghcss:
             with open(log_path, "w", buffering=1) as log_file:
@@ -399,11 +416,8 @@ def make_run_specsims(
             he6_logger = logging.getLogger("he6_cres_spec_sims")
             handler = logging.FileHandler(log_path)
             he6_logger.addHandler(handler)
-            prev_level = he6_logger.level
             prev_propagate = he6_logger.propagate
-            he6_logger.setLevel(getattr(logging, (log_level or "INFO").upper(), logging.INFO))
             he6_logger.propagate = False
-            apply_overrides(log_override)
 
             # Bridge Python's warnings module (numpy/scipy's own
             # RuntimeWarning etc. go through this, not logging, by
@@ -417,7 +431,15 @@ def make_run_specsims(
             # Restored via warnings.showwarning directly, not
             # captureWarnings(False), since that would unconditionally
             # turn capturing off even if something else in this process
-            # had already enabled it before this call.
+            # had already enabled it before this call. This logger's own
+            # level (not just its handler) is set explicitly to DEBUG,
+            # unlike he6_logger above: captured warnings don't have a
+            # meaningful INFO-vs-DEBUG distinction the way application
+            # log calls do, and the goal here is simply that none of them
+            # get silently dropped by this logger's own level filter --
+            # a narrower, different concern from general verbosity
+            # control, so it stays local to this function rather than
+            # moving to root-level config too.
             warnings_logger = logging.getLogger("py.warnings")
             warnings_logger.addHandler(handler)
             prev_warnings_level = warnings_logger.level
@@ -439,8 +461,9 @@ def make_run_specsims(
 
                 he6_logger.removeHandler(handler)
                 handler.close()
-                he6_logger.setLevel(prev_level)
                 he6_logger.propagate = prev_propagate
+
+        logger.info("specsims complete")
 
     return fn
 
@@ -449,9 +472,25 @@ def delete_specsims_output(task_dir: Path) -> None:
     """Deletes the .speck files (and their containing spec_files/
     directory), no longer needed once Katydid has consumed them. Only ever
     runs after katydid_done in STEPS's own fixed order.
+
+    Also removes the specsims/ directory itself if it's now empty: by this
+    point mc_truth_deleted has already removed bands.csv/dmtracks.csv (see
+    STEPS's own order -- mc_truth_deleted runs well before this), so this
+    step's own spec_files/ removal is normally what leaves specsims/
+    empty. rmdir only succeeds on a genuinely empty directory, so this is
+    a no-op (not an error) if specsims.yaml's own output ever produces
+    anything else there that isn't part of this cleanup.
     """
-    spec_files_dir = task_dir / SPECSIMS_OUTPUT_DIRNAME / "spec_files"
+    specsims_dir = task_dir / SPECSIMS_OUTPUT_DIRNAME
+    spec_files_dir = specsims_dir / "spec_files"
     shutil.rmtree(spec_files_dir, ignore_errors=True)
+    dir_removed = False
+    try:
+        specsims_dir.rmdir()
+        dir_removed = True
+    except OSError:
+        pass  # not empty (something else is in there) or already gone
+    logger.info("specsims_output_deleted: spec_files/ (specsims/ dir also removed: %s)", dir_removed)
 
 
 def build_katydid_command_for_task(task_dir: Path, katydid_path: str, katydid_config: str, noise_paths: list[str]) -> list[str]:
@@ -510,6 +549,7 @@ def build_katydid_command_for_task(task_dir: Path, katydid_path: str, katydid_co
     command.append(f"--brw.output-file={root_path}")
     command.append(f"--stv.output-file={slew_path}")
     command.append("--log-level=PROG")
+    logger.info("katydid command: %s", " ".join(command))
     return command
 
 
@@ -534,8 +574,10 @@ def make_run_katydid(katydid_config: str, noise_paths: list[str]) -> Callable[[P
         katydid_path = resolve_katydid_path()
         command = build_katydid_command_for_task(task_dir, katydid_path, katydid_config, noise_paths)
         log_path = task_dir / KATYDID_LOG_FILENAME
+        logger.info("katydid starting, own log -> %s", log_path)
         with open(log_path, "w", buffering=1) as log_file:
             subprocess.run(command, check=True, stdout=log_file, stderr=subprocess.STDOUT)
+        logger.info("katydid complete")
 
     return fn
 
@@ -645,6 +687,7 @@ def run_tracks_proto_conversion(task_dir: Path) -> None:
             setattr(t, field, values[i].item())
 
     _write_proto_zst(track_list, task_dir / TRACKS_PROTO_FILENAME)
+    logger.info("tracks_proto_done: %d tracks", len(track_list.tracks))
 
 
 def run_slew_proto_conversion(task_dir: Path) -> None:
@@ -660,6 +703,7 @@ def run_slew_proto_conversion(task_dir: Path) -> None:
         s.time_off = row.Time_Off
 
     _write_proto_zst(slew_list, task_dir / SLEW_TIMES_PROTO_FILENAME)
+    logger.info("slew_proto_done: %d slew_times rows", len(slew_list.slew_times))
 
 
 def delete_katydid_output(task_dir: Path) -> None:
@@ -668,6 +712,7 @@ def delete_katydid_output(task_dir: Path) -> None:
     missing_ok=True for the same reason as delete_uncompressed_log."""
     (task_dir / ROOT_FILENAME).unlink(missing_ok=True)
     (task_dir / SLEW_TIMES_FILENAME).unlink(missing_ok=True)
+    logger.info("katydid_output_deleted: track.root, slew_times.txt")
 
 
 def _not_implemented_without_factory(step_name: str, factory_name: str):
