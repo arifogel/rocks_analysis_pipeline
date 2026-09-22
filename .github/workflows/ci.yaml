@@ -236,6 +236,23 @@ jobs:
           bazelisk-cache: true
           repository-cache: true
           disk-cache: true
+          # Without this, this job shares a cache namespace with the ubuntu-24.04 matrix
+          # jobs above: setup-bazel's own disk-cache key is scoped by the *runner's* platform/
+          # arch, not by anything specific to this job -- and since this job is runs-on:
+          # ubuntu-latest with container: almalinux:9 (the container changes what actually
+          # executes, not what the runner itself reports), setup-bazel sees the identical
+          # "linux-x64" identity the native Ubuntu jobs do. GitHub Actions cache keys are
+          # immutable once written (a save to an existing key is silently skipped, never
+          # overwritten) -- so a save under a shared, colliding key, from any job, at any
+          # point, permanently locks that slot's content in for every future run under that
+          # same key, regardless of which job's own build actually produced it. Confirmed
+          # directly, not assumed: a real run showed this job restoring a "successful" cache
+          # hit that was only ~5 MB (disk) / ~0 MB (repository) -- far too small to be a real
+          # Katydid build's own disk cache, and Bazel recompiling everything from scratch
+          # despite the "successful" restore. cache-version below gives this job its own,
+          # unshared slot, the same mechanism (and the same reasoning) as the Ubuntu matrix
+          # job's own cache-version above.
+          cache-version: almalinux9
 
       - name: Verify MODULE.bazel.lock is up to date and build everything
         run: bazel build --@pypi//venv=dev //...
