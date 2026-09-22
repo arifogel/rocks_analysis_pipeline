@@ -47,12 +47,23 @@ py_proto_library(
 )
 
 proto_library(
-    name = "track_proto",
-    srcs = ["track.proto"],
+    name = "event_proto",
+    srcs = ["event.proto"],
     deps = [":task_identity_proto"],
 )
 
 py_proto_library(
-    name = "track_py_pb2",
-    deps = [":track_proto"],
+    name = "event_py_pb2",
+    deps = [":event_proto"],
+)
+
+proto_library(
+    name = "point_proto",
+    srcs = ["point.proto"],
+    deps = [":task_identity_proto"],
+)
+
+py_proto_library(
+    name = "point_py_pb2",
+    deps = [":point_proto"],
 )

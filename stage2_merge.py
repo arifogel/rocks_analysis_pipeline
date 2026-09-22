@@ -1,25 +1,25 @@
-"""Stage 2: merges every stage-1 task's own bands/dmtracks/tracks proto
-output for one run into a single, per-run BandLists/DMTrackLists/TrackLists
-file each -- runs_dir/run_name/{bands,dmtracks,tracks}.pb.zst, sibling to
-that run's own subrun_*/ directories.
+"""Stage 2: merges every stage-1 task's own bands/dmtracks/events/points
+proto output for one run into a single, per-run BandLists/DMTrackLists/
+EventLists/PointLists file each -- runs_dir/run_name/{bands,dmtracks,events,
+points}.pb.zst, sibling to that run's own subrun_*/ directories.
 
 Deliberately a merge, not a flatten: each task's own BandList/DMTrackList/
-TrackList (already carrying its own TaskIdentity -- see task_identity.proto's
-own doc comment) is gathered as-is into the wrapping BandLists/DMTrackLists/
-TrackLists (see each one's own doc comment in band.proto/dmtrack.proto/
-track.proto), not exploded into one flat list of rows. No per-row identity
-is lost, and no schema change to Band/DMTrack/Track themselves was needed
-for this.
+EventList/PointList (already carrying its own TaskIdentity -- see
+task_identity.proto's own doc comment) is gathered as-is into the wrapping
+BandLists/DMTrackLists/EventLists/PointLists (see each one's own doc
+comment in band.proto/dmtrack.proto/event.proto/point.proto), not exploded
+into one flat list of rows. No per-row identity is lost, and no schema
+change to Band/DMTrack/Event/Point themselves was needed for this.
 
 slew_times is deliberately not merged here: assumed identical across every
 task of a run (same DAQ config, same simulated acquisition timing), and not
 consumed by cresproc regardless -- see this project's own commit history.
 
 Strict by default: if any task directory is missing any of bands/dmtracks/
-tracks .pb.zst, run_stage2_merge refuses to write anything at all -- not
-just for the affected type, the whole merge doesn't start. allow_missing
-opts into the alternative: skip whatever's missing (per type, with a
-warning), merging whatever is actually there.
+events/points .pb.zst, run_stage2_merge refuses to write anything at all --
+not just for the affected type, the whole merge doesn't start.
+allow_missing opts into the alternative: skip whatever's missing (per
+type, with a warning), merging whatever is actually there.
 
 Called directly (in-process, not as a subprocess) from local_ssa.py's own
 main() after every stage-1 task for a run completes, since there's no
@@ -37,8 +37,13 @@ from typing import Callable, TypeVar
 
 import compression.zstd as zstd
 
-from api.v1 import band_pb2, dmtrack_pb2, track_pb2
-from stage1_steps import BANDS_PROTO_FILENAME, DMTRACKS_PROTO_FILENAME, TRACKS_PROTO_FILENAME
+from api.v1 import band_pb2, dmtrack_pb2, event_pb2, point_pb2
+from stage1_steps import (
+    BANDS_PROTO_FILENAME,
+    DMTRACKS_PROTO_FILENAME,
+    EVENTS_PROTO_FILENAME,
+    POINTS_PROTO_FILENAME,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,20 +82,23 @@ def _write_proto_zst(message, path: Path) -> None:
         f.write(message.SerializeToString())
 
 
+# Every proto type stage 2 merges -- the single source of truth for both
+# check_all_files_present's own strict-mode validation and
+# run_stage2_merge's own per-type merge calls, so the two can never drift
+# out of sync with each other.
+_MERGED_FILENAMES = (BANDS_PROTO_FILENAME, DMTRACKS_PROTO_FILENAME, EVENTS_PROTO_FILENAME, POINTS_PROTO_FILENAME)
+
+
 def check_all_files_present(task_dirs: list[Path]) -> None:
     """Raises if any task directory is missing any of bands/dmtracks/
-    tracks .pb.zst. Called once, upfront, before any merging starts (not
-    per-type, mid-merge) -- so with allow_missing=False (the default), a
-    missing file is caught before any output is written at all, not just
-    for the affected type.
+    events/points .pb.zst. Called once, upfront, before any merging starts
+    (not per-type, mid-merge) -- so with allow_missing=False (the
+    default), a missing file is caught before any output is written at
+    all, not just for the affected type.
     """
     missing: dict[Path, list[str]] = {}
     for d in task_dirs:
-        missing_here = [
-            filename
-            for filename in (BANDS_PROTO_FILENAME, DMTRACKS_PROTO_FILENAME, TRACKS_PROTO_FILENAME)
-            if not (d / filename).is_file()
-        ]
+        missing_here = [filename for filename in _MERGED_FILENAMES if not (d / filename).is_file()]
         if missing_here:
             missing[d] = missing_here
     if missing:
@@ -140,18 +148,22 @@ def merge_dmtracks(task_dirs: list[Path]) -> dmtrack_pb2.DMTrackLists:
     )
 
 
-def merge_tracks(task_dirs: list[Path]) -> track_pb2.TrackLists:
-    return _merge_one_type(task_dirs, TRACKS_PROTO_FILENAME, track_pb2.TrackList, track_pb2.TrackLists, "track_lists")
+def merge_events(task_dirs: list[Path]) -> event_pb2.EventLists:
+    return _merge_one_type(task_dirs, EVENTS_PROTO_FILENAME, event_pb2.EventList, event_pb2.EventLists, "event_lists")
+
+
+def merge_points(task_dirs: list[Path]) -> point_pb2.PointLists:
+    return _merge_one_type(task_dirs, POINTS_PROTO_FILENAME, point_pb2.PointList, point_pb2.PointLists, "point_lists")
 
 
 def run_stage2_merge(runs_dir: Path, run_name: str, allow_missing: bool = False) -> None:
-    """The actual stage-2 step: merges bands/dmtracks/tracks for one run
-    and writes each to runs_dir/run_name/<same filename as the per-task
-    one>, sibling to that run's own subrun_*/ directories (per direct
-    instruction on the output path convention).
+    """The actual stage-2 step: merges bands/dmtracks/events/points for
+    one run and writes each to runs_dir/run_name/<same filename as the
+    per-task one>, sibling to that run's own subrun_*/ directories (per
+    direct instruction on the output path convention).
 
     allow_missing=False (the default): refuses to write anything at all
-    if any task directory is missing any of the three expected files --
+    if any task directory is missing any of the four expected files --
     see check_all_files_present's own doc comment. allow_missing=True
     skips whatever's missing per type instead (with a warning), merging
     whatever is actually there -- _merge_one_type's own long-standing
@@ -178,6 +190,10 @@ def run_stage2_merge(runs_dir: Path, run_name: str, allow_missing: bool = False)
         "wrote %s: %d task(s) merged", run_dir / DMTRACKS_PROTO_FILENAME, len(merged_dmtracks.dmtrack_lists)
     )
 
-    merged_tracks = merge_tracks(task_dirs)
-    _write_proto_zst(merged_tracks, run_dir / TRACKS_PROTO_FILENAME)
-    logger.info("wrote %s: %d task(s) merged", run_dir / TRACKS_PROTO_FILENAME, len(merged_tracks.track_lists))
+    merged_events = merge_events(task_dirs)
+    _write_proto_zst(merged_events, run_dir / EVENTS_PROTO_FILENAME)
+    logger.info("wrote %s: %d task(s) merged", run_dir / EVENTS_PROTO_FILENAME, len(merged_events.event_lists))
+
+    merged_points = merge_points(task_dirs)
+    _write_proto_zst(merged_points, run_dir / POINTS_PROTO_FILENAME)
+    logger.info("wrote %s: %d task(s) merged", run_dir / POINTS_PROTO_FILENAME, len(merged_points.point_lists))

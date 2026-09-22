@@ -38,7 +38,7 @@ def parse_args() -> argparse.Namespace:
         "--allow-missing",
         action="store_true",
         help="merge whatever's actually there, skipping (with a warning) any task dir missing bands/dmtracks/"
-        "tracks .pb.zst -- default: refuse to write anything at all if anything is missing",
+        "events/points .pb.zst -- default: refuse to write anything at all if anything is missing",
     )
     arg("--log-level", type=str, default="INFO", help="root log level -- see logging_setup.init_logging")
     arg(

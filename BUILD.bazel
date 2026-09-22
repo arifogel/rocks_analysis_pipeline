@@ -128,9 +128,10 @@ py_library(
         ":stage1_state_lib",
         "//api/v1:band_py_pb2",
         "//api/v1:dmtrack_py_pb2",
+        "//api/v1:event_py_pb2",
+        "//api/v1:point_py_pb2",
         "//api/v1:slew_times_py_pb2",
         "//api/v1:task_identity_py_pb2",
-        "//api/v1:track_py_pb2",
         "@he6-cres-spec-sims//src/he6_cres_spec_sims",
         "@rules_python//python/runfiles",
     ],
@@ -168,7 +169,8 @@ py_library(
         ":stage1_steps_lib",
         "//api/v1:band_py_pb2",
         "//api/v1:dmtrack_py_pb2",
-        "//api/v1:track_py_pb2",
+        "//api/v1:event_py_pb2",
+        "//api/v1:point_py_pb2",
     ],
 )
 

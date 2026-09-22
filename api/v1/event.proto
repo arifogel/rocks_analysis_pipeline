@@ -1,0 +1,90 @@
+syntax = "proto3";
+
+package com.github.helium6cres.rocks_analysis_pipeline.api.v1;
+
+import "api/v1/task_identity.proto";
+
+option go_package = "github.com/Helium6CRES/rocks_analysis_pipeline/api/v1";
+
+// Event matches one reconstructed multi-band event, read directly from
+// Katydid's own .root output (f["MB-events"]["MultiBandEvent"]["fTracks"],
+// the KTMultiBandEventData class's own per-event tracks) -- not from an
+// intermediate CSV, so field types here match the real ROOT branch types
+// (UInt_t/Int_t/Double_t), verified directly against Katydid's own C++
+// source, not inferred from how a CSV happened to print them. The current
+// CSV-based pipeline loses this distinction: every one of the six integer
+// fields below prints with a misleading ".0" suffix in tracks.csv, an
+// artifact of pandas silently promoting a mixed dataframe's columns to
+// float64, not anything true about the underlying data.
+//
+// Named Event, not Track: this is the same data the old CSV-based
+// pipeline's own tracks.csv held (confirmed directly against
+// local_ssa_post_processing.py's own proven extraction, which reads from
+// this exact same "MB-events"/MultiBandEvent/fTracks path), but "tracks.csv"
+// was itself a misnomer -- this is one row per reconstructed event
+// (EventId/EventType/BandNumber -- the multi-band event builder's own
+// output), not a standalone track listing. See point.proto's own Point
+// message for the actual, separate per-point track data (a different ROOT
+// tree entirely, "tracks" not "MB-events") this project isn't perpetuating
+// that naming confusion for.
+//
+// Two fields present in the real ROOT branches (and in tracks.csv) are
+// deliberately omitted: UniqueID and Bits. The underlying ROOT class
+// inherits from ROOT's own TObject base class, which is what actually puts
+// fUniqueID/fBits on every instance -- they're ROOT's own internal
+// object-bookkeeping fields, not anything Katydid computed about the
+// event, and carry no physics meaning.
+message Event {
+  uint32 track_id = 1;
+  uint32 event_id = 2;
+  int32 band_number = 3;    // signed: real data has negative sideband numbers
+  uint32 event_type = 4;
+  double axial_freq = 5;
+  int32 num_points = 6;
+  double start_frequency = 7;
+  double end_frequency = 8;
+  double freq_length = 9;
+  double start_time_in_run_c = 10;
+  double end_time_in_run_c = 11;
+  double time_length = 12;
+  double start_time_in_acq_c = 13;
+  double end_time_in_acq_c = 14;
+  int32 start_acq_id = 15;
+  double acq_freq_intercept = 16;
+  double bulk_slope = 17;
+  double mean_local_slope = 18;
+  double max_local_slope = 19;
+  double min_local_slope = 20;
+  double std_dev_local_slope = 21;
+  double total_nsp = 22;
+  double mean_nsp = 23;
+  double max_nsp = 24;
+  double min_nsp = 25;
+  double std_dev_nsp = 26;
+  double total_power = 27;
+  double mean_power = 28;
+  double max_power = 29;
+  double min_power = 30;
+  double std_dev_power = 31;
+  double manhattan_length = 32;
+  double density = 33;
+  double nsp_per_unit_length = 34;
+  double density_est_snr = 35;
+  double mle_power_snr = 36;
+}
+
+// EventList is stage 1's own events_proto_done output: every Event from one
+// task's Katydid .root file, plus the TaskIdentity every one of those
+// events shares (see task_identity.proto's own doc comment for why it
+// lives here and not on each Event).
+message EventList {
+  TaskIdentity task = 1;
+  repeated Event events = 2;
+}
+
+// EventLists is stage 2's own merge-step output: every task's own
+// EventList for one run, gathered as-is (not flattened -- see BandLists's
+// own doc comment in band.proto for the full reasoning, identical here).
+message EventLists {
+  repeated EventList event_lists = 1;
+}

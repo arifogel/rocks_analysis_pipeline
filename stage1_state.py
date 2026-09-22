@@ -76,7 +76,8 @@ STEP_KATYDID_DONE = "katydid_done"
 STEP_KATYDID_LOG_COMPRESSED = "katydid_log_compressed"
 STEP_UNCOMPRESSED_KATYDID_LOG_DELETED = "uncompressed_katydid_log_deleted"
 STEP_SPECSIMS_OUTPUT_DELETED = "specsims_output_deleted"  # .speck files, no longer needed once Katydid has consumed them
-STEP_TRACKS_PROTO_DONE = "tracks_proto_done"  # .root -> proto
+STEP_EVENTS_PROTO_DONE = "events_proto_done"  # .root (MB-events tree) -> proto
+STEP_POINTS_PROTO_DONE = "points_proto_done"  # .root (tracks tree) -> proto
 STEP_SLEW_PROTO_DONE = "slew_proto_done"  # slew-times -> proto
 STEP_KATYDID_OUTPUT_DELETED = "katydid_output_deleted"  # .root + slew-times, no longer needed once converted
 
@@ -91,7 +92,8 @@ STEPS: list[str] = [
     STEP_KATYDID_LOG_COMPRESSED,
     STEP_UNCOMPRESSED_KATYDID_LOG_DELETED,
     STEP_SPECSIMS_OUTPUT_DELETED,
-    STEP_TRACKS_PROTO_DONE,
+    STEP_EVENTS_PROTO_DONE,
+    STEP_POINTS_PROTO_DONE,
     STEP_SLEW_PROTO_DONE,
     STEP_KATYDID_OUTPUT_DELETED,
 ]

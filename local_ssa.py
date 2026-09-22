@@ -7,8 +7,9 @@ ProcessPoolExecutor -- see the reasoning below -- then, once every task has
 completed successfully, calls stage2_merge.run_stage2_merge directly
 in-process (no subprocess: unlike stage1_task, there's no crash-isolation
 need for a pure read-and-merge step) to merge that run's own bands/
-dmtracks/tracks into runs_dir/run_name/{bands,dmtracks,tracks}.pb.zst (see
-stage2_merge.py's own module doc comment for the real logic).
+dmtracks/events/points into runs_dir/run_name/{bands,dmtracks,events,
+points}.pb.zst (see stage2_merge.py's own module doc comment for the real
+logic).
 
 Crash isolation is achieved by stage1_task itself running as its own fresh
 subprocess, once per task -- not by this orchestrator's own worker being a
