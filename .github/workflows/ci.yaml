@@ -6,14 +6,258 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  # The ROOT version used by the Ubuntu and AlmaLinux jobs below. Bump this (and nowhere else)
+  # to change it - both jobs' download URLs are built from this value. Confirm any new version
+  # is actually published for both platforms at https://root.cern/install/all_releases/ before
+  # bumping.
+  ROOT_VERSION: "6.40.04"
+
 jobs:
   build-and-test:
-    name: Bazel Build & Test
-    runs-on: ubuntu-latest
+    name: Bazel Build (${{ matrix.os }}, ${{ matrix.compilation_mode }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+        compilation_mode: [fastbuild]
+        include:
+          # dbg and opt get special-cased handling in the Bazel build (see .bazelrc's
+          # STANDARD define and KTLogger's own NDEBUG/STANDARD-gated verbosity floor) that
+          # fastbuild alone never exercises - dbg is also specifically the mode CLion's
+          # Bazel plugin uses when debugging, and opt is what actual production runs use.
+          # One OS is enough to catch a regression in either; this logic is not
+          # platform-specific, so it isn't worth tripling the full OS matrix for it.
+          - os: ubuntu-24.04
+            compilation_mode: dbg
+          - os: ubuntu-24.04
+            compilation_mode: opt
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Configure git for private repo access
+        run: git config --global url."https://${{ secrets.READ_PRIVATE_CRES_REPOS }}@github.com/".insteadOf "https://github.com/"
+
+      # --- Linux: Boost, FFTW, and MatIO come from apt (which installs into locations the
+      # compiler already searches by default, so no further configuration is needed - see
+      # tools/system_deps.bzl). ROOT comes from a prebuilt binary published by the ROOT team,
+      # since Ubuntu does not package a usable ROOT build.
+      #
+      # libtbb12 and libblas3 are not Katydid's own dependencies - they are runtime
+      # dependencies of ROOT's own prebuilt binaries and shared libraries (rootcling itself
+      # needs libtbb12; every test binary here links ROOT's shared libraries, which need
+      # libblas3), which (unlike the ROOT build installed via Homebrew on macOS) does not
+      # bundle its own copy of everything it depends on. A missing one here doesn't show up
+      # until every single test fails at runtime with a bare "Exit 127" - see the "Check a
+      # built test binary" step below, which exists specifically to catch this class of
+      # problem with a clear error message instead.
+      #
+      # This used to use a third-party action (awalsh128/cache-apt-pkgs-action) to cache these
+      # packages across runs, which computes its own cache key internally from a normalized
+      # version of the package list. In practice this produced a stale cache hit after
+      # libblas3 was added to the list below - the action's own docs state that "the default
+      # branch cache is available to other branches", a real GitHub Actions cache fallback
+      # mechanism, and the action has several open upstream issues describing exactly this
+      # class of problem (e.g. awalsh128/cache-apt-pkgs-action#138, #56). Caching just the
+      # downloaded .deb files ourselves, keyed directly on a hash of this file, avoids
+      # depending on a third party's internal cache-key computation entirely: this key is
+      # correct by construction, since it changes if and only if this file - which is the only
+      # place the package list lives - changes. `apt-get install` itself is fast and safe to
+      # run unconditionally even on a cache hit, since apt already skips re-downloading
+      # packages it finds in its local archive cache and skips reinstalling packages already
+      # at the requested version.
+      - name: Cache downloaded .deb files (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: /var/cache/apt/archives
+          key: apt-archives-${{ hashFiles('.github/workflows/ci.yaml') }}
+
+      - name: Install Boost/FFTW/MatIO/ROOT runtime deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libboost-filesystem-dev \
+            libboost-thread-dev \
+            libboost-date-time-dev \
+            libboost-program-options-dev \
+            libfftw3-dev \
+            libmatio-dev \
+            libtbb12 \
+            libblas3
+          # lock and partial/ are apt's own root-owned runtime bookkeeping, not downloaded
+          # package files - the cache step above only wants the actual .deb files. Left in
+          # place, both are unreadable by the (non-root) runner user, and the post-job cache
+          # save step fails outright trying to archive them ("Permission denied"), taking the
+          # whole cache down with it rather than just skipping these two paths.
+          sudo rm -f /var/cache/apt/archives/lock
+          sudo rm -rf /var/cache/apt/archives/partial
+
+      - name: Cache ROOT (Linux)
+        if: runner.os == 'Linux'
+        id: cache-root-linux
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: /opt/root
+          key: root-linux-${{ env.ROOT_VERSION }}-ubuntu24.04-gcc13.3
+
+      - name: Download and extract ROOT (Linux)
+        if: runner.os == 'Linux' && steps.cache-root-linux.outputs.cache-hit != 'true'
+        run: |
+          ROOT_URL="https://root.cern/download/root_v${ROOT_VERSION}.Linux-ubuntu24.04-x86_64-gcc13.3.tar.gz"
+          wget -q -O /tmp/root.tar.gz "$ROOT_URL"
+          tar -xzf /tmp/root.tar.gz -C /opt/
+
+      - name: Add ROOT to PATH (Linux)
+        if: runner.os == 'Linux'
+        run: echo "/opt/root/bin" >> "$GITHUB_PATH"
+
+      # --- macOS: Homebrew is preinstalled on GitHub's runners, but ROOT, Boost, FFTW, and
+      # MatIO are not, and are large enough downloads to be worth caching across CI runs even
+      # though each run starts from a fresh virtual machine.
+      - name: Cache Homebrew downloads (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/Library/Caches/Homebrew
+          key: brew-cache-${{ runner.os }}
+          restore-keys: |
+            brew-cache-${{ runner.os }}
+
+      - name: Install Boost/FFTW/MatIO/ROOT (macOS)
+        if: runner.os == 'macOS'
+        run: brew install boost fftw libmatio root
+
+      - name: Set up Bazel & Caching
+        uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+        with:
+          bazelisk-cache: true
+          repository-cache: true
+          disk-cache: true
+          # Without this, all three ubuntu-24.04 variants (fastbuild/dbg/opt) compute an
+          # identical disk-cache key (setup-bazel's own cache key is scoped by platform/arch,
+          # not by anything specific to this workflow's matrix), and race to save to the same
+          # slot - not a correctness risk, since Bazel's disk cache is content-addressed
+          # internally, but only one of the three would actually persist between CI runs,
+          # non-deterministically. This gives each compilation mode its own cache namespace.
+          cache-version: ${{ matrix.compilation_mode }}
+
+      - name: Verify MODULE.bazel.lock is up to date and build everything
+        run: bazel build -c ${{ matrix.compilation_mode }} --@pypi//venv=dev //...
+
+      - name: Test everything
+        run: bazel test -c ${{ matrix.compilation_mode }} //...
+  # rather than as a third value in the matrix above: GitHub Actions has a known issue
+  # (https://github.com/actions/runner/issues/265) where using an empty `container:` value to
+  # mean "run natively, no container" for some matrix combinations can fail workflow validation
+  # outright. A fully separate job avoids that risk entirely.
+  build-and-test-almalinux:
+    name: Bazel Build (almalinux-9)
+    runs-on: ubuntu-latest
+    container:
+      image: almalinux:9
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # AlmaLinux is a RHEL-family Linux distribution, using dnf (and the EPEL and CRB add-on
+      # repositories) rather than apt. gcc-c++ and git are not Katydid dependencies as such -
+      # they are needed for Bazel itself to work at all (a C++ compiler, and the `git` command
+      # Bazel uses to fetch Katydid's own bundled dependencies), and are not present in this
+      # minimal container image by default.
+      #
+      # xxhash-devel and tbb-devel are, like libtbb12 in the Ubuntu job above, not Katydid
+      # dependencies either - they are runtime dependencies of the prebuilt `rootcling` binary
+      # fetched below. freetype and gsl are the same category again, but for ROOT's own shared
+      # libraries rather than rootcling specifically: every test binary here links ROOT, which
+      # needs both at runtime (font rendering and linear algebra, respectively). A missing one
+      # here doesn't show up until every single test fails at runtime with a bare "Exit 127" -
+      # see the "Check a built test binary" step below, which exists specifically to catch this
+      # class of problem with a clear error message instead. matio-devel requires the EPEL
+      # repository; boost-devel, fftw-devel, tbb-devel, freetype, and gsl are in AlmaLinux's own
+      # default repository. CRB is enabled in case any future dependency needs it - enabling it
+      # costs nothing if unused.
+      - name: Install build tools and Boost/FFTW/MatIO/ROOT runtime deps (dnf)
+        run: |
+          dnf install -y epel-release
+          dnf config-manager --set-enabled crb
+          dnf install -y --setopt=keepcache=True \
+            gcc-c++ \
+            git \
+            wget \
+            tar \
+            boost-devel \
+            fftw-devel \
+            matio-devel \
+            tbb-devel \
+            xxhash-devel \
+            freetype \
+            gsl
+
+      # keepcache=True above is needed for this cache to actually help: dnf deletes downloaded
+      # packages after a successful install by default.
+      - name: Cache dnf packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: /var/cache/dnf
+          key: dnf-cache-almalinux9
+
+      - name: Cache ROOT
+        id: cache-root-almalinux
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: /opt/root
+          key: root-almalinux9-${{ env.ROOT_VERSION }}-gcc11.5
+
+      - name: Download and extract ROOT
+        if: steps.cache-root-almalinux.outputs.cache-hit != 'true'
+        run: |
+          ROOT_URL="https://root.cern/download/root_v${ROOT_VERSION}.Linux-almalinux9.8-x86_64-gcc11.5.tar.gz"
+          wget -q -O /tmp/root.tar.gz "$ROOT_URL"
+          tar -xzf /tmp/root.tar.gz -C /opt/
+
+      # The prebuilt ROOT binary depends on a number of shared libraries that are not always
+      # present on a fresh container image; missing ones surface as a build failure much later,
+      # inside the actual Bazel build. This step catches all of them at once, right after
+      # extracting ROOT, by asking the dynamic linker (ldd) to resolve rootcling's complete
+      # dependency chain up front.
+      - name: Check ROOT binaries for missing shared libraries
+        run: |
+          ROOT_LIBDIR=$(/opt/root/bin/root-config --libdir)
+          MISSING=$(ldd /opt/root/bin/rootcling 2>&1 | grep "not found" || true)
+          if [ -n "$MISSING" ]; then
+            echo "Missing shared library dependencies for rootcling:"
+            echo "$MISSING"
+            echo "(ROOT lib directory: $ROOT_LIBDIR)"
+            exit 1
+          fi
+
+      - name: Add ROOT to PATH
+        run: echo "/opt/root/bin" >> "$GITHUB_PATH"
+
+      # bazel-contrib/setup-bazel's usual automatic Bazel installation does not reliably work
+      # inside this minimal container image, so Bazelisk (the tool that installs the correct
+      # Bazel version automatically) is installed directly here instead, using the standard
+      # installation method documented by the Bazel project itself.
+      - name: Install Bazelisk directly (works regardless of what setup-bazel's installer needs)
+        run: |
+          wget -q -O /usr/local/bin/bazel \
+            https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64
+          chmod +x /usr/local/bin/bazel
+
+      # Caches the actual Bazel release binary that Bazelisk downloads (much larger than
+      # Bazelisk itself), in case setup-bazel's own caching does not take effect reliably in
+      # this container the way it does on the native runners above.
+      - name: Cache Bazelisk's downloaded Bazel binary
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: /root/.cache/bazelisk
+          key: bazelisk-cache-almalinux9-${{ hashFiles('.bazelversion') }}
 
       - name: Set up Bazel & Caching
         uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
@@ -22,12 +266,22 @@ jobs:
           repository-cache: true
           disk-cache: true
 
-      - name: Configure git for private repo access
-        run: git config --global url."https://${{ secrets.READ_PRIVATE_CRES_REPOS }}@github.com/".insteadOf "https://github.com/"
+      - name: Verify MODULE.bazel.lock is up to date and build everything
+        run: bazel build //...
 
-      - name: Build Everything
+      # See the equivalent step in the Ubuntu/macOS job above for why this checks a test
+      # binary specifically, separately from the rootcling check further up.
+      - name: Check a built test binary for missing shared libraries
         run: |
-          bazel build --@pypi//venv=dev //...
+          MISSING=$(ldd bazel-bin/Source/Executables/Validation/TestVector 2>&1 | grep "not found" || true)
+          if [ -n "$MISSING" ]; then
+            echo "Missing shared library dependencies for TestVector:"
+            echo "$MISSING"
+            exit 1
+          fi
+
+      - name: Test everything
+        run: bazel test //...
 
   lint-and-format:
     runs-on: ubuntu-latest
