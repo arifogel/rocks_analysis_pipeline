@@ -51,7 +51,7 @@ py_binary(
         ":local_spec_sims.py",
         ":run_spec_sims_ghcss.py",
     ],
-    data = ["@ghcss//cmd/specsims:specsims"],
+    data = ["@ghcss//cmd/specsims"],
     main = ":local_spec_sims.py",
     deps = cdeps([
         requirement("numpy"),
@@ -151,7 +151,7 @@ py_binary(
     name = "stage1_task",
     srcs = [":stage1_task.py"],
     data = [
-        "@ghcss//cmd/specsims:specsims",
+        "@ghcss//cmd/specsims",
         "@katydid//Source/Executables/Main:Katydid",
     ],
     main = ":stage1_task.py",
@@ -194,7 +194,7 @@ py_binary(
     # subprocess, so nothing bundles these in transitively the way a data
     # dependency on that py_binary used to.
     data = [
-        "@ghcss//cmd/specsims:specsims",
+        "@ghcss//cmd/specsims",
         "@katydid//Source/Executables/Main:Katydid",
     ],
     main = ":local_ssa.py",
