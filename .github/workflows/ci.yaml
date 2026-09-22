@@ -270,7 +270,7 @@ jobs:
           disk-cache: true
 
       - name: Verify MODULE.bazel.lock is up to date and build everything
-        run: bazel build //...
+        run: bazel build --@pypi//venv=dev //...
 
       # See the equivalent step in the Ubuntu/macOS job above for why this checks a test
       # binary specifically, separately from the rootcling check further up.
@@ -284,7 +284,7 @@ jobs:
           fi
 
       - name: Test everything
-        run: bazel test //...
+        run: bazel test --@pypi//venv=dev //...
 
   lint-and-format:
     runs-on: ubuntu-latest
