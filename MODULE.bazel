@@ -16,7 +16,20 @@ python.toolchain(
 bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "aspect_rules_py", version = "1.12.1")
 bazel_dep(name = "protobuf", version = "36.2")
-bazel_dep(name = "he6-cres-spec-sims", version = "0.1.0")
+bazel_dep(name = "he6-cres-spec-sims", version = "0.2.0")
+git_override(
+    module_name = "he6-cres-spec-sims",
+    # Pinned to a specific commit, not a branch: with --lockfile_mode=error (see
+    # .bazelrc), Bazel does not re-resolve module dependencies over the network at all --
+    # it fails if MODULE.bazel.lock is out of date rather than silently drifting -- but
+    # that only makes builds reproducible if what's declared here is itself unambiguous.
+    # A branch name isn't: "main" can move, and nothing here would force a rebuild off
+    # the new commit or flag that it changed. To pick up a newer he6-cres-spec-sims
+    # commit: update this hash, then run `bazel mod deps --lockfile_mode=update` and
+    # commit the resulting MODULE.bazel.lock change alongside it.
+    commit = "07515352515a6f933c7b0de76afc7fc30ff8920a",  # main, as of 2026-09-22: "Bazelization, CI, proper logging, raise instead of silent return, optimizations (#2)"
+    remote = "https://github.com/arifogel/he6-cres-spec-sims.git",
+)
 bazel_dep(name = "katydid", version = "0.1.0")
 git_override(
     module_name = "katydid",
