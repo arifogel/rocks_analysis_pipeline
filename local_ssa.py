@@ -166,7 +166,7 @@ def parse_args() -> argparse.Namespace:
         "--json-config -- also where this driver reads len(fields_T) from, to enumerate "
         "field_index values",
     )
-    arg("--num-subruns", type=int, default=1, help="number of subruns, 0..num-subruns-1")
+    arg("--num-subruns", type=int, required=True, help="number of subruns, 0..num-subruns-1")
     arg("--initial-seed", type=int, default=0, help="seed for subrun_id=0, matching stage1_task.py's own --initial-seed")
     arg("--katydid-config", type=str, required=True, help="full path to the base katydid yaml config file")
 
