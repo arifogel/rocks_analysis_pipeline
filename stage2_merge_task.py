@@ -34,6 +34,12 @@ def parse_args() -> argparse.Namespace:
 
     arg("--runs-dir", type=str, required=True, help="base runs directory, matching local_ssa.py's own --runs-dir")
     arg("--run-name", type=str, required=True, help="run name, matching local_ssa.py's own --run-name")
+    arg(
+        "--allow-missing",
+        action="store_true",
+        help="merge whatever's actually there, skipping (with a warning) any task dir missing bands/dmtracks/"
+        "tracks .pb.zst -- default: refuse to write anything at all if anything is missing",
+    )
     arg("--log-level", type=str, default="INFO", help="root log level -- see logging_setup.init_logging")
     arg(
         "--log-override",
@@ -48,7 +54,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     init_logging(args.log_level, args.log_override)
-    run_stage2_merge(Path(args.runs_dir), args.run_name)
+    run_stage2_merge(Path(args.runs_dir), args.run_name, allow_missing=args.allow_missing)
 
 
 if __name__ == "__main__":

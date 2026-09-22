@@ -15,6 +15,12 @@ slew_times is deliberately not merged here: assumed identical across every
 task of a run (same DAQ config, same simulated acquisition timing), and not
 consumed by cresproc regardless -- see this project's own commit history.
 
+Strict by default: if any task directory is missing any of bands/dmtracks/
+tracks .pb.zst, run_stage2_merge refuses to write anything at all -- not
+just for the affected type, the whole merge doesn't start. allow_missing
+opts into the alternative: skip whatever's missing (per type, with a
+warning), merging whatever is actually there.
+
 Called directly (in-process, not as a subprocess) from local_ssa.py's own
 main() after every stage-1 task for a run completes, since there's no
 crash-isolation need for a pure read-and-merge step the way there was for
@@ -71,6 +77,31 @@ def _write_proto_zst(message, path: Path) -> None:
         f.write(message.SerializeToString())
 
 
+def check_all_files_present(task_dirs: list[Path]) -> None:
+    """Raises if any task directory is missing any of bands/dmtracks/
+    tracks .pb.zst. Called once, upfront, before any merging starts (not
+    per-type, mid-merge) -- so with allow_missing=False (the default), a
+    missing file is caught before any output is written at all, not just
+    for the affected type.
+    """
+    missing: dict[Path, list[str]] = {}
+    for d in task_dirs:
+        missing_here = [
+            filename
+            for filename in (BANDS_PROTO_FILENAME, DMTRACKS_PROTO_FILENAME, TRACKS_PROTO_FILENAME)
+            if not (d / filename).is_file()
+        ]
+        if missing_here:
+            missing[d] = missing_here
+    if missing:
+        details = "; ".join(f"{d}: missing {', '.join(files)}" for d, files in missing.items())
+        raise RuntimeError(
+            f"{len(missing)} of {len(task_dirs)} task dir(s) are missing expected stage-1 output -- "
+            f"refusing to merge (pass allow_missing=True / --allow-missing to merge anyway, skipping "
+            f"whatever's missing): {details}"
+        )
+
+
 def _merge_one_type(
     task_dirs: list[Path],
     filename: str,
@@ -113,16 +144,27 @@ def merge_tracks(task_dirs: list[Path]) -> track_pb2.TrackLists:
     return _merge_one_type(task_dirs, TRACKS_PROTO_FILENAME, track_pb2.TrackList, track_pb2.TrackLists, "track_lists")
 
 
-def run_stage2_merge(runs_dir: Path, run_name: str) -> None:
+def run_stage2_merge(runs_dir: Path, run_name: str, allow_missing: bool = False) -> None:
     """The actual stage-2 step: merges bands/dmtracks/tracks for one run
     and writes each to runs_dir/run_name/<same filename as the per-task
     one>, sibling to that run's own subrun_*/ directories (per direct
     instruction on the output path convention).
+
+    allow_missing=False (the default): refuses to write anything at all
+    if any task directory is missing any of the three expected files --
+    see check_all_files_present's own doc comment. allow_missing=True
+    skips whatever's missing per type instead (with a warning), merging
+    whatever is actually there -- _merge_one_type's own long-standing
+    skip logic already does this; the only thing that changes here is
+    whether check_all_files_present runs first to rule it out entirely.
     """
     task_dirs = find_task_dirs(runs_dir, run_name)
     if not task_dirs:
         raise RuntimeError(f"No stage-1 task directories found under {runs_dir / run_name}/subrun_*/field_*")
     logger.info("stage2 merge: found %d task dir(s) under %s", len(task_dirs), runs_dir / run_name)
+
+    if not allow_missing:
+        check_all_files_present(task_dirs)
 
     run_dir = runs_dir / run_name
 
