@@ -151,4 +151,22 @@ py_binary(
     ],
 )
 
+py_binary(
+    name = "local_stage1",
+    srcs = [":local_stage1.py"],
+    # stage1_task itself, not its own transitive data deps directly:
+    # bazel bundles a py_binary's own runfiles (including *its* own data,
+    # ghcss's specsims and katydid) into any other target that depends on
+    # it, so this alone is what makes
+    # local_stage1.resolve_stage1_task_path's own runfiles.Rlocation call
+    # resolvable at all.
+    data = [":stage1_task"],
+    main = ":local_stage1.py",
+    deps = [
+        ":logging_setup_lib",
+        ":stage1_state_lib",
+        "@rules_python//python/runfiles",
+    ],
+)
+
 python_ide_backport()
