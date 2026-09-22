@@ -40,11 +40,15 @@ py_binary(
     deps = [":rocks_utility_lib"],
 )
 
+py_library(
+    name = "logging_setup_lib",
+    srcs = ["logging_setup.py"],
+)
+
 py_binary(
     name = "local_spec_sims",
     srcs = [
         ":local_spec_sims.py",
-        ":logging_setup.py",
         ":run_spec_sims_ghcss.py",
     ],
     data = ["@ghcss//cmd/specsims:specsims"],
@@ -52,7 +56,10 @@ py_binary(
     deps = cdeps([
         requirement("numpy"),
         requirement("pyyaml"),
-    ]) + ["@rules_python//python/runfiles"],
+    ]) + [
+        ":logging_setup_lib",
+        "@rules_python//python/runfiles",
+    ],
 )
 
 py_binary(
@@ -116,6 +123,7 @@ py_library(
         requirement("pyyaml"),
         requirement("uproot"),
     ]) + [
+        ":logging_setup_lib",
         ":noise_paths_lib",
         ":stage1_state_lib",
         "//api/v1:band_py_pb2",

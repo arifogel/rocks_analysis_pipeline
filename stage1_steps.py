@@ -34,12 +34,13 @@ import yaml
 from python.runfiles import runfiles
 
 from api.v1 import band_pb2, dmtrack_pb2, slew_times_pb2, task_identity_pb2, track_pb2
+from logging_setup import apply_overrides
 from stage1_state import parse_task_dir
 
 SPECSIMS_RLOCATION = "ghcss+/cmd/specsims/specsims_/specsims"  # matches local_spec_sims.py's own constant
 KATYDID_RLOCATION = "katydid+/Source/Executables/Main/Katydid"  # matches local_ssa_katydid.py's own constant
 
-LOG_FILENAME = "local_spec_sims.log"
+LOG_FILENAME = "specsims.log"
 COMPRESSED_LOG_FILENAME = LOG_FILENAME + ".zst"
 
 # specsims's own config and output layout within task_dir. Named
@@ -314,13 +315,15 @@ def make_run_specsims(
     initial_seed: int,
     noise_paths: list[str],
     use_ghcss: bool = False,
+    log_level: str | None = None,
+    log_override: str | None = None,
 ) -> Callable[[Path], None]:
     """Builds the run_specsims step function for one stage-1 run, capturing
-    yaml_config/json_config/initial_seed/noise_paths via closure --
-    run_stage1_task's own step_fns interface only ever passes task_dir
-    itself (see run_stage1_task's own doc comment), so anything a step
-    needs beyond that has to be captured this way rather than threaded
-    through that interface.
+    yaml_config/json_config/initial_seed/noise_paths/log_level/log_override
+    via closure -- run_stage1_task's own step_fns interface only ever
+    passes task_dir itself (see run_stage1_task's own doc comment), so
+    anything a step needs beyond that has to be captured this way rather
+    than threaded through that interface.
 
     Renders this task's own specsims.yaml (see render_specsims_config's
     own doc comment), then actually runs it. Default (use_ghcss=False):
@@ -348,13 +351,26 @@ def make_run_specsims(
     since he6-cres-spec-sims's own print() calls were converted to real
     logger calls specifically so this handler-based capture would work.
     propagate=False for the same scoping reason, so nothing from this
-    call also reaches a root-level handler if one happens to exist. Fully
-    compatible with cresproc-style per-module overrides
-    (logging.getLogger("he6_cres_spec_sims.simulation_blocks.DAQ").
-    setLevel(...)): Python resolves a logger's effective level starting
-    at the logger itself, so an explicit override on a child logger wins
-    over this handler's own DEBUG level on the parent, regardless of what
-    the handler does.
+    call also reaches a root-level handler if one happens to exist.
+
+    The package logger's own level defaults to INFO (log_level=None), not
+    DEBUG: he6-cres-spec-sims's own per-chunk debug lines (see that
+    project's own commit history -- one specific line fires ~146,500
+    times per acquisition) are meant to be suppressed by default, and
+    defaulting the whole package to DEBUG would undo exactly that.
+    log_level overrides this package-wide default (matching
+    logging_setup.init_logging's own root_level shape); log_override
+    applies logging_setup.apply_overrides on top of it -- e.g.
+    "he6_cres_spec_sims.simulation_blocks.DAQ=DEBUG" to raise just that
+    one submodule back up when its detail actually is wanted, while
+    everything else stays at the package-wide default. Python resolves a
+    logger's effective level starting at the logger itself, so an
+    override on a child logger always wins over the parent's own level,
+    regardless of what either is set to or in what order. Unlike the
+    "he6_cres_spec_sims"/"py.warnings" handler setup below, log_override's
+    own effects are not saved/restored afterward: they're scoped to this
+    whole stage1_task invocation, by design, not just this one call, so
+    persisting past this function is correct, not a leftover.
 
     Also bridges the warnings module (numpy/scipy's own RuntimeWarning
     etc., which bypass logging entirely by default) into the same log
@@ -380,8 +396,9 @@ def make_run_specsims(
             he6_logger.addHandler(handler)
             prev_level = he6_logger.level
             prev_propagate = he6_logger.propagate
-            he6_logger.setLevel(logging.DEBUG)
+            he6_logger.setLevel(getattr(logging, (log_level or "INFO").upper(), logging.INFO))
             he6_logger.propagate = False
+            apply_overrides(log_override)
 
             # Bridge Python's warnings module (numpy/scipy's own
             # RuntimeWarning etc. go through this, not logging, by

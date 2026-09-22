@@ -105,6 +105,21 @@ def parse_args() -> argparse.Namespace:
         help="use the ghcss Go binary instead of he6-cres-spec-sims for the specsims step (default: "
         "he6-cres-spec-sims) -- see make_run_specsims's own doc comment for why this isn't the default",
     )
+    arg(
+        "--log-level",
+        type=str,
+        default=None,
+        help="he6-cres-spec-sims's own package-wide log level for this run (default: INFO -- see "
+        "make_run_specsims's own doc comment for why INFO, not DEBUG)",
+    )
+    arg(
+        "--log-override",
+        type=str,
+        default=None,
+        help="comma-separated logger_name=LEVEL overrides for individual he6-cres-spec-sims submodules, "
+        "applied on top of --log-level (e.g. 'he6_cres_spec_sims.simulation_blocks.DAQ=DEBUG') -- see "
+        "logging_setup.apply_overrides",
+    )
 
     arg(
         "--keep-uncompressed-log",
@@ -176,7 +191,13 @@ def build_step_fns(args: argparse.Namespace, noise_paths: list[str]) -> dict:
     """
     step_fns = dict(stage1_steps.STEP_FNS)
     step_fns["specsims_done"] = stage1_steps.make_run_specsims(
-        args.yaml_config, args.json_config, args.initial_seed, noise_paths, use_ghcss=args.use_ghcss
+        args.yaml_config,
+        args.json_config,
+        args.initial_seed,
+        noise_paths,
+        use_ghcss=args.use_ghcss,
+        log_level=args.log_level,
+        log_override=args.log_override,
     )
     step_fns["katydid_done"] = stage1_steps.make_run_katydid(args.katydid_config, noise_paths)
     return step_fns

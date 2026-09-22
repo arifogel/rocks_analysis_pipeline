@@ -5,22 +5,15 @@ import logging
 base_fmt = "%(asctime)s %(levelname)s %(name)s"
 
 
-def init_logging(root_level: str | None, overrides_str: str | None) -> None:
-    """Parses granular logging definitions and configures the logging subsystem.
-
-    Same shape as cresproc.logging.init_logging: root_level sets the root
-    logger's level (e.g. "INFO", "DEBUG"); overrides_str is a comma-separated
-    "logger_name=LEVEL" list for raising or lowering individual loggers below
-    the root level (e.g. "botocore=WARNING,myapp.noisy_module=DEBUG").
+def apply_overrides(overrides_str: str | None) -> None:
+    """Applies a comma-separated "logger_name=LEVEL" list, raising or
+    lowering individual loggers independent of whatever their root/parent
+    level is (e.g. "botocore=WARNING,myapp.noisy_module=DEBUG"). Split out
+    from init_logging so a caller that doesn't want (or can't safely do,
+    see stage1_steps.make_run_specsims's own doc comment on why a scoped,
+    in-process call shouldn't touch root-level config) init_logging's own
+    logging.basicConfig call can still reuse this part.
     """
-    if not root_level:
-        root_level_num = None
-    else:
-        root_level_num = getattr(logging, root_level.upper(), None)
-        if root_level_num is None:
-            logging.warning("Ignored invalid root log level '%s'.", root_level)
-    logging.basicConfig(level=root_level_num, format=f"{base_fmt}: %(message)s")
-
     if not overrides_str:
         return
 
@@ -38,3 +31,22 @@ def init_logging(root_level: str | None, overrides_str: str | None) -> None:
             logging.getLogger(logger_name).setLevel(target_level)
         else:
             logging.warning("Ignored invalid log level '%s' specified for namespace '%s'.", level_name, logger_name)
+
+
+def init_logging(root_level: str | None, overrides_str: str | None) -> None:
+    """Parses granular logging definitions and configures the logging subsystem.
+
+    Same shape as cresproc.logging.init_logging: root_level sets the root
+    logger's level (e.g. "INFO", "DEBUG"); overrides_str is a comma-separated
+    "logger_name=LEVEL" list for raising or lowering individual loggers below
+    the root level (e.g. "botocore=WARNING,myapp.noisy_module=DEBUG").
+    """
+    if not root_level:
+        root_level_num = None
+    else:
+        root_level_num = getattr(logging, root_level.upper(), None)
+        if root_level_num is None:
+            logging.warning("Ignored invalid root log level '%s'.", root_level)
+    logging.basicConfig(level=root_level_num, format=f"{base_fmt}: %(message)s")
+
+    apply_overrides(overrides_str)
