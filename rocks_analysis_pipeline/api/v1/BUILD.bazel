@@ -1,3 +1,4 @@
+load("@aspect_rules_py//py:defs.bzl", "py_library")
 load("@protobuf//bazel:proto_library.bzl", "proto_library")
 load("@protobuf//bazel:py_proto_library.bzl", "py_proto_library")
 
@@ -66,4 +67,33 @@ proto_library(
 py_proto_library(
     name = "point_py_pb2",
     deps = [":point_proto"],
+)
+
+# Wraps every proto type's own py_proto_library output with an explicit
+# sys.path entry for this repo's own root (two levels up from
+# rocks_analysis_pipeline/api/v1/, where this package lives) -- needed
+# for cross-module consumers like cresproc (an entirely different bazel
+# module, depending on this one via bazel_dep), which otherwise get
+# "ModuleNotFoundError: No module named 'rocks_analysis_pipeline'":
+# confirmed directly, not assumed, that py_proto_library's own generated
+# target doesn't propagate a usable imports/sys.path entry the way a
+# plain py_library does (a real .pth file from a real cresproc build had
+# no entry for this module's own runfiles at all, while protobuf's own
+# python runtime -- which does set this up correctly -- was present).
+# Matches he6-cres-spec-sims's own py_library, which needs the identical
+# fix for the identical reason (also consumed cross-module, by this
+# project itself) -- see that project's own src/he6_cres_spec_sims/
+# BUILD.bazel: imports = [".."], one level up from where that package
+# lives, same idea.
+py_library(
+    name = "api_v1_py",
+    imports = ["../.."],
+    deps = [
+        ":band_py_pb2",
+        ":dmtrack_py_pb2",
+        ":event_py_pb2",
+        ":point_py_pb2",
+        ":slew_times_py_pb2",
+        ":task_identity_py_pb2",
+    ],
 )
