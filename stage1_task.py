@@ -7,8 +7,9 @@ previous attempt left off.
 
 Analogous to run_spec_sims_ghcss.py/local_ssa_katydid.py's own single-
 config/single-row logic, but for the combined stage-1 pipeline -- this is
-the thing local_stage1.py (not yet written) will fan out across a process
-pool / wulf nodes, one invocation per task.
+the thing local_ssa.py fans out across a thread pool, once per invocation
+of this file as its own fresh subprocess per task (see local_ssa.py's own
+doc comment on why a subprocess and why threads, not processes).
 
 Flags are kebab-case (--runs-dir, not --runs_dir) -- deliberately
 different from local_spec_sims.py/local_ssa_katydid.py's own snake_case

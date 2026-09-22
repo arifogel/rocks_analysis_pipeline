@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """
-Local, parallel driver for stage 1: fans out stage1_task.py across every
-(subrun_id, field_index) task for a run, via a ThreadPoolExecutor -- not a
-ProcessPoolExecutor (see the reasoning below).
+Local, parallel orchestration driver for this project's ssa (spec-sims and
+analysis) pipeline -- currently stage 1 only (fans out stage1_task.py
+across every (subrun_id, field_index) task for a run, via a
+ThreadPoolExecutor, not a ProcessPoolExecutor -- see the reasoning below);
+stage 2 (the merge step, not yet designed) is meant to join this same
+orchestrator once it exists, rather than get its own separate driver.
 
 Crash isolation is achieved by stage1_task itself running as its own fresh
 subprocess, once per task -- not by this orchestrator's own worker being a
@@ -28,19 +31,29 @@ as a fresh subprocess (init_logging is called there, same as here, since a
 subprocess doesn't inherit this process's own logging config) -- nothing
 about that needs reinitializing or redirecting from here.
 
+Flags are kebab-case, matching stage1_task.py's own convention -- and, for
+every flag this shares a concept with (--runs-dir, --run-name,
+--yaml-config, --json-config, --initial-seed, --katydid-config,
+--noise-id/--noise-paths, --use-ghcss, --log-level, --log-override, every
+--keep-<x>), the name here is identical to stage1_task.py's own, not just
+similarly named -- so a value copied from one CLI's own --help works
+unchanged on the other. Deliberately different from local_spec_sims.py/
+local_ssa_katydid.py's own snake_case convention for this same kind of
+orchestration-layer file.
+
 Example:
-    bazel run --@pypi//venv=dev //:local_stage1 -- \\
-        --run_name=test1 \\
-        --runs_base_dir=/path/to/runs \\
-        --yaml_config=/path/to/base.yaml \\
-        --json_config=/path/to/base.json \\
-        --num_subruns=25 \\
-        --initial_seed=0 \\
-        --katydid_config=/path/to/katydid_base.yaml \\
-        --noise_id=1234 \\
+    bazel run --@pypi//venv=dev //:local_ssa -- \\
+        --run-name=test1 \\
+        --runs-dir=/path/to/runs \\
+        --yaml-config=/path/to/base.yaml \\
+        --json-config=/path/to/base.json \\
+        --num-subruns=25 \\
+        --initial-seed=0 \\
+        --katydid-config=/path/to/katydid_base.yaml \\
+        --noise-id=1234 \\
         --max-jobs=8
-    # or, in place of --noise_id:
-        --noise_paths /path/to/noise_ch0.spec /path/to/noise_ch1.spec
+    # or, in place of --noise-id:
+        --noise-paths /path/to/noise_ch0.spec /path/to/noise_ch1.spec
 """
 
 import argparse
@@ -64,7 +77,9 @@ logger = logging.getLogger(__name__)
 # runfiles-relative prefix for a target defined in this same workspace, not
 # an external dependency (unlike e.g. stage1_steps.py's own
 # SPECSIMS_RLOCATION/KATYDID_RLOCATION, which use "<module>+/..." for
-# external deps pulled in via bazel_dep).
+# external deps pulled in via bazel_dep). stage1_task itself isn't renamed
+# by this file's own local_stage1.py -> local_ssa.py rename, so this stays
+# as-is.
 STAGE1_TASK_RLOCATION = "rocks-analysis-pipeline/stage1_task"
 
 # stage1_task's own per-task log, written by stage1_task.py's own main()
@@ -75,10 +90,12 @@ STAGE1_TASK_RLOCATION = "rocks-analysis-pipeline/stage1_task"
 STAGE1_TASK_LOG_FILENAME = "stage1_task.log"
 
 # Maps each --keep-<x> flag on *this* CLI to the matching stage1_task.py
-# flag to pass through unchanged -- kept as an explicit map (not just
-# forwarding args verbatim) so this file's own flags stay independently
-# named/documented, matching stage1_task.py's own KEEP_FLAG_STEPS pattern
-# of an explicit table rather than positional pass-through.
+# flag to pass through unchanged -- both sides use the identical flag name
+# (see this module's own doc comment on why), so this is a straight
+# identity map; kept explicit anyway, matching stage1_task.py's own
+# KEEP_FLAG_STEPS pattern of a table rather than blind forwarding, so a
+# flag added to one file doesn't silently start (or stop) passing through
+# without a matching, visible entry here.
 KEEP_FLAG_PASSTHROUGH: dict[str, str] = {
     "keep_uncompressed_specsims_log": "--keep-uncompressed-specsims-log",
     "keep_mc_truth": "--keep-mc-truth",
@@ -126,55 +143,51 @@ def parse_args() -> argparse.Namespace:
     par = argparse.ArgumentParser()
     arg = par.add_argument
 
-    # snake_case, matching local_spec_sims.py/local_ssa_katydid.py's own
-    # convention for this orchestration layer -- deliberately different
-    # from stage1_task.py's own kebab-case (see that file's own doc
-    # comment on why), since this file is the same kind of thing as those
-    # two, not a single-task entry point.
-    arg("-r", "--run_name", type=str, required=True, help="run name")
-    arg("-rb", "--runs_base_dir", type=str, required=True, help="base output directory for runs")
-    arg("-y", "--yaml_config", type=str, required=True, help="base specsims yaml config, matching local_spec_sims.py's own --yaml_config")
+    # Kebab-case throughout, no short aliases -- matching stage1_task.py's
+    # own style exactly (see this module's own doc comment on why), not
+    # local_spec_sims.py/local_ssa_katydid.py's own snake_case-plus-short-
+    # alias convention.
+    arg("--run-name", type=str, required=True, help="run name")
+    arg("--runs-dir", type=str, required=True, help="base output directory for runs, matching stage1_task.py's own --runs-dir")
+    arg("--yaml-config", type=str, required=True, help="base specsims yaml config, matching stage1_task.py's own --yaml-config")
     arg(
-        "-j",
-        "--json_config",
+        "--json-config",
         type=str,
         required=True,
-        help="base specsims json config (fields_T/traps_A/etc.) -- also where this driver reads "
-        "len(fields_T) from, to enumerate field_index values",
+        help="base specsims json config (fields_T/traps_A/etc.), matching stage1_task.py's own "
+        "--json-config -- also where this driver reads len(fields_T) from, to enumerate "
+        "field_index values",
     )
-    arg("-n", "--num_subruns", type=int, default=1, help="number of subruns, 0..num_subruns-1")
-    arg("-s0", "--initial_seed", type=int, default=0, help="seed for subrun_id=0, matching stage1_task.py's own --initial-seed")
-    arg("-kc", "--katydid_config", type=str, required=True, help="full path to the base katydid yaml config file")
+    arg("--num-subruns", type=int, default=1, help="number of subruns, 0..num-subruns-1")
+    arg("--initial-seed", type=int, default=0, help="seed for subrun_id=0, matching stage1_task.py's own --initial-seed")
+    arg("--katydid-config", type=str, required=True, help="full path to the base katydid yaml config file")
 
-    # Exactly one of --noise_id/--noise_paths, matching stage1_task.py's
+    # Exactly one of --noise-id/--noise-paths, matching stage1_task.py's
     # own mutually exclusive group exactly (see that file's own doc
     # comment) -- passed through unchanged to every task.
     noise_group = par.add_mutually_exclusive_group(required=True)
-    noise_group.add_argument("-nid", "--noise_id", type=int, help="run_id to look up for noise floor -- mutually exclusive with --noise_paths")
+    noise_group.add_argument("--noise-id", type=int, help="run_id to look up for noise floor -- mutually exclusive with --noise-paths")
     noise_group.add_argument(
-        "-np",
-        "--noise_paths",
+        "--noise-paths",
         type=str,
         nargs=2,
         metavar=("CHANNEL_0_PATH", "CHANNEL_1_PATH"),
-        help="paths to the two (per-channel) noise .spec(k) files directly -- mutually exclusive with --noise_id",
+        help="paths to the two (per-channel) noise .spec(k) files directly -- mutually exclusive with --noise-id",
     )
 
-    arg("--use_ghcss", action="store_true", help="pass --use-ghcss through to every task")
+    arg("--use-ghcss", action="store_true", help="pass --use-ghcss through to every task")
 
     arg(
         "--max-jobs",
-        dest="max_jobs",
         type=int,
         default=None,
         help="max number of (subrun, field) tasks to run concurrently (default: os.cpu_count())",
     )
-    arg("-d", "--dry_run", action="store_true", help="print the planned tasks without running them")
+    arg("--dry-run", action="store_true", help="print the planned tasks without running them")
 
-    arg("--log-level", dest="log_level", type=str, default="INFO", help="root log level -- see logging_setup.init_logging")
+    arg("--log-level", type=str, default="INFO", help="root log level -- see logging_setup.init_logging")
     arg(
         "--log-override",
-        dest="log_override",
         type=str,
         default=None,
         help="comma-separated logger_name=LEVEL overrides -- see logging_setup.init_logging. Passed "
@@ -220,7 +233,7 @@ def build_task_command(stage1_task_path: str, args: argparse.Namespace, job: dic
     """
     command = [
         stage1_task_path,
-        f"--runs-dir={args.runs_base_dir}",
+        f"--runs-dir={args.runs_dir}",
         f"--run-name={args.run_name}",
         f"--subrun-id={job['subrun_id']}",
         f"--field-index={job['field_index']}",
@@ -259,7 +272,7 @@ def _run_one_task(stage1_task_path: str, args: argparse.Namespace, job: dict[str
     task_label = f"subrun {job['subrun_id']} field {job['field_index']}"
     token = _task_ctx.set(task_label)
     try:
-        d = task_dir(Path(args.runs_base_dir), args.run_name, job["subrun_id"], job["field_index"])
+        d = task_dir(Path(args.runs_dir), args.run_name, job["subrun_id"], job["field_index"])
         d.mkdir(parents=True, exist_ok=True)
         log_path = d / STAGE1_TASK_LOG_FILENAME
 
