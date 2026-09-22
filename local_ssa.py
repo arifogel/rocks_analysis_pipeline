@@ -17,6 +17,19 @@ each worker thread is mostly just waiting on a subprocess (I/O-bound, not
 CPU-bound in this process), matching cresproc/model.py's own reasoning for
 using threads over processes for comparable I/O-bound work.
 
+That subprocess is this process's own sys.executable invoked directly
+against stage1_task.py's own plain source file, not stage1_task's own
+bazel-generated launcher -- confirmed the hard way, not by design: that
+launcher creates and manages its own separate, per-binary venv every time
+it runs, and a fresh runfiles tree gets created on every single invocation,
+so many tasks' own launchers racing to set up that same venv concurrently
+produced a real, reproducible crash (a different failure message each time,
+depending on exactly how two invocations collided). This process is
+already running inside its own venv's interpreter, fully set up once
+before any tasks start and never recreated -- reusing it directly for
+every task means no new venv ever gets created per task at all. See
+resolve_stage1_task_py_path's own doc comment for the full account.
+
 Because multiple worker threads share this one process's root logger, each
 log record is tagged with which task its own thread is currently on (via a
 contextvars.ContextVar + logging.Filter -- the same mechanism
@@ -73,14 +86,14 @@ from stage1_state import task_dir
 
 logger = logging.getLogger(__name__)
 
-# Matches this repo's own module(name = ...) in MODULE.bazel -- the
-# runfiles-relative prefix for a target defined in this same workspace, not
-# an external dependency (unlike e.g. stage1_steps.py's own
-# SPECSIMS_RLOCATION/KATYDID_RLOCATION, which use "<module>+/..." for
-# external deps pulled in via bazel_dep). stage1_task itself isn't renamed
-# by this file's own local_stage1.py -> local_ssa.py rename, so this stays
-# as-is.
-STAGE1_TASK_RLOCATION = "rocks-analysis-pipeline/stage1_task"
+# Matches this repo's own runfiles layout for a target defined in this same
+# workspace, confirmed directly against a real runfiles tree listing --
+# "_main" is bazel's own canonical name for the main/root repository under
+# bzlmod, regardless of MODULE.bazel's own module(name=...) declaration
+# (confirmed wrong the first time: this was "rocks-analysis-pipeline/
+# stage1_task", guessed from generic runfiles documentation rather than
+# checked against this actual repo's own tree).
+STAGE1_TASK_PY_RLOCATION = "_main/stage1_task.py"
 
 # stage1_task's own per-task log, written by stage1_task.py's own main()
 # every time it runs (a fresh process, so it calls init_logging itself --
@@ -118,23 +131,34 @@ class _TaskContextFilter(logging.Filter):
         return True
 
 
-def resolve_stage1_task_path() -> str:
-    """Resolves stage1_task's own bazel-generated launcher via runfiles.
-    That launcher is self-locating -- it finds its own stage1_task.runfiles/
-    tree sitting next to itself on disk, regardless of who spawns it or
-    what this (calling) process's own runfiles tree looks like -- so no
-    extra environment setup is needed for the subprocess this gets used to
-    start, unlike a raw (non-bazel-launcher) script would need.
+def resolve_stage1_task_py_path() -> str:
+    """Resolves stage1_task.py's own plain source file via runfiles --
+    deliberately not stage1_task's own bazel-generated launcher (a
+    different, earlier approach that turned out to be the actual bug:
+    that launcher creates and manages its own separate per-binary venv
+    every time it runs, and since a fresh runfiles tree gets created on
+    every single invocation -- confirmed directly, not assumed -- many
+    concurrent tasks racing to set up that same venv at once produced a
+    real, reproducible crash, with a different failure message each time
+    depending on exactly how two invocations collided).
+
+    The fix: this process (local_ssa itself) is already running inside
+    its own venv's Python interpreter -- sys.executable, used below where
+    this gets invoked -- fully set up once, before any tasks start, and
+    never recreated. Every task reuses that same, already-stable
+    interpreter directly against this plain source file, so no new venv
+    ever gets created per task at all.
     """
     r = runfiles.Create()
-    path = r.Rlocation(STAGE1_TASK_RLOCATION)
+    path = r.Rlocation(STAGE1_TASK_PY_RLOCATION)
     if path is None or not Path(path).is_file():
         raise RuntimeError(
-            f"Could not resolve stage1_task via runfiles at "
-            f"'{STAGE1_TASK_RLOCATION}' (got: {path}). If this repo's own "
-            f"module name (MODULE.bazel's own module(name=...)) or "
-            f"stage1_task's own BUILD.bazel target name has changed, "
-            f"update STAGE1_TASK_RLOCATION at the top of this file."
+            f"Could not resolve stage1_task.py via runfiles at "
+            f"'{STAGE1_TASK_PY_RLOCATION}' (got: {path}). If this repo's "
+            f"own canonical main-repository runfiles name (currently "
+            f"'_main') or stage1_task.py's own BUILD.bazel srcs have "
+            f"changed, update STAGE1_TASK_PY_RLOCATION at the top of this "
+            f"file."
         )
     return path
 
@@ -225,14 +249,18 @@ def build_jobs(args: argparse.Namespace) -> list[dict[str, Any]]:
     return jobs
 
 
-def build_task_command(stage1_task_path: str, args: argparse.Namespace, job: dict[str, Any]) -> list[str]:
-    """Builds the stage1_task command line for one task. Split out from
-    _run_one_task so this half -- the part with real, checkable logic --
-    is directly testable without needing a real stage1_task_path or to
-    actually invoke it.
+def build_task_command(stage1_task_py_path: str, args: argparse.Namespace, job: dict[str, Any]) -> list[str]:
+    """Builds the stage1_task command line for one task: this process's own
+    already-running interpreter (sys.executable) against stage1_task.py's
+    plain source file -- see resolve_stage1_task_py_path's own doc comment
+    for why, not stage1_task's own bazel-generated launcher directly. Split
+    out from _run_one_task so this half -- the part with real, checkable
+    logic -- is directly testable without needing a real
+    stage1_task_py_path or to actually invoke it.
     """
     command = [
-        stage1_task_path,
+        sys.executable,
+        stage1_task_py_path,
         f"--runs-dir={args.runs_dir}",
         f"--run-name={args.run_name}",
         f"--subrun-id={job['subrun_id']}",
@@ -262,7 +290,7 @@ def build_task_command(stage1_task_path: str, args: argparse.Namespace, job: dic
     return command
 
 
-def _run_one_task(stage1_task_path: str, args: argparse.Namespace, job: dict[str, Any]) -> Path:
+def _run_one_task(stage1_task_py_path: str, args: argparse.Namespace, job: dict[str, Any]) -> Path:
     """Runs a single (subrun, field) task as its own fresh subprocess --
     see this module's own docstring for why a subprocess (crash isolation)
     and why a ThreadPoolExecutor rather than a ProcessPoolExecutor is what
@@ -276,7 +304,7 @@ def _run_one_task(stage1_task_path: str, args: argparse.Namespace, job: dict[str
         d.mkdir(parents=True, exist_ok=True)
         log_path = d / STAGE1_TASK_LOG_FILENAME
 
-        command = build_task_command(stage1_task_path, args, job)
+        command = build_task_command(stage1_task_py_path, args, job)
         logger.info("starting")
         # buffering=1 (line-buffered): same reasoning as local_spec_sims.py's
         # own _run_one_job -- without it, a log file tailed mid-run can lag
@@ -309,7 +337,7 @@ def main() -> None:
             logger.info("[dry_run] subrun %s field %s", job["subrun_id"], job["field_index"])
         return
 
-    stage1_task_path = resolve_stage1_task_path()
+    stage1_task_py_path = resolve_stage1_task_py_path()
 
     max_jobs = args.max_jobs
     logger.info("Running %d task(s) with max_jobs=%s", len(jobs), max_jobs or "(cpu count)")
@@ -317,7 +345,7 @@ def main() -> None:
     failures: list[str] = []
     with ThreadPoolExecutor(max_workers=max_jobs) as pool:
         futures: dict[Future, dict[str, Any]] = {
-            pool.submit(_run_one_task, stage1_task_path, args, job): job for job in jobs
+            pool.submit(_run_one_task, stage1_task_py_path, args, job): job for job in jobs
         }
         for future in as_completed(futures):
             job = futures[future]
