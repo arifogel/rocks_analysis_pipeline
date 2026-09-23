@@ -7,6 +7,11 @@ on:
       - "MODULE.bazel"
       - ".bazelrc"
       - ".bazelversion"
+      - "**/*.bzl"
+
+env:
+  # Keep in sync with .github/workflows/ci.yaml's ROOT_VERSION.
+  ROOT_VERSION: "6.40.04"
 
 jobs:
   update-bazel-lockfile:
@@ -19,6 +24,50 @@ jobs:
           ref: ${{ github.head_ref }}
           # Requires a PAT or App Token with repo write permissions
           token: ${{ secrets.PAT_WITH_WRITE_ACCESS }}
+
+      - name: Configure git for private repo access
+        run: git config --global url."https://${{ secrets.READ_PRIVATE_CRES_REPOS }}@github.com/".insteadOf "https://github.com/"
+
+      # Regenerating MODULE.bazel.lock requires evaluating every module extension declared in
+      # MODULE.bazel, including katydid's own tools/system_deps.bzl - which requires Boost,
+      # FFTW, and MatIO to actually be present on this runner. See ci.yaml for the reasoning
+      # behind this specific set of packages and cache strategy.
+      - name: Cache downloaded .deb files
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: /var/cache/apt/archives
+          key: apt-archives-${{ hashFiles('.github/workflows/lockfile-sync.yaml') }}
+
+      - name: Install Boost/FFTW/MatIO
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libboost-filesystem-dev \
+            libboost-thread-dev \
+            libboost-date-time-dev \
+            libboost-program-options-dev \
+            libfftw3-dev \
+            libmatio-dev \
+            libtbb12
+          sudo rm -f /var/cache/apt/archives/lock
+          sudo rm -rf /var/cache/apt/archives/partial
+
+      - name: Cache ROOT
+        id: cache-root-linux
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: /opt/root
+          key: root-linux-${{ env.ROOT_VERSION }}-ubuntu24.04-gcc13.3
+
+      - name: Download and extract ROOT
+        if: steps.cache-root-linux.outputs.cache-hit != 'true'
+        run: |
+          ROOT_URL="https://root.cern/download/root_v${ROOT_VERSION}.Linux-ubuntu24.04-x86_64-gcc13.3.tar.gz"
+          wget -q -O /tmp/root.tar.gz "$ROOT_URL"
+          tar -xzf /tmp/root.tar.gz -C /opt/
+
+      - name: Add ROOT to PATH
+        run: echo "/opt/root/bin" >> "$GITHUB_PATH"
 
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
 
