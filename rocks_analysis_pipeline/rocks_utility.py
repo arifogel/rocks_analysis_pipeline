@@ -120,6 +120,7 @@ def sbatch_job(
         mem: int = 0,
         run_in_apptainer = False,
         hold: bool = False,
+        dependency: str = "",
         ) -> sp.CompletedProcess:
 
     log_path = str(log_path)
@@ -136,6 +137,9 @@ def sbatch_job(
 
     if hold:
         sbatch_cmd.append("--hold")
+
+    if dependency:
+        sbatch_cmd.append(f"--dependency={dependency}")
 
     if array:
         if isinstance(array, int):
