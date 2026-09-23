@@ -61,14 +61,41 @@ KEEP_FLAG_STEPS: dict[str, str] = {
 }
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     par = argparse.ArgumentParser()
     arg = par.add_argument
 
     arg("--runs-dir", type=str, required=True, help="base runs directory (stage1_state.task_dir's own runs_dir)")
     arg("--run-name", type=str, required=True)
-    arg("--subrun-id", type=int, required=True)
-    arg("--field-index", type=int, required=True)
+
+    # Exactly one of {--subrun-id, --field-index} or {--job-id, --num-fields}.
+    arg(
+        "--subrun-id",
+        type=int,
+        default=None,
+        help="subrun ID directly -- mutually exclusive with --job-id/--num-fields",
+    )
+    arg(
+        "--field-index",
+        type=int,
+        default=None,
+        help="field index directly -- mutually exclusive with --job-id/--num-fields",
+    )
+    arg(
+        "--job-id",
+        type=int,
+        default=None,
+        help="flat task index (e.g. Slurm's own $SLURM_ARRAY_TASK_ID) to derive subrun_id/field_index "
+        "from, given --num-fields: subrun_id = job_id // num_fields, field_index = job_id %% num_fields -- "
+        "mutually exclusive with --subrun-id/--field-index",
+    )
+    arg(
+        "--num-fields",
+        type=int,
+        default=None,
+        help="number of field_index values per subrun, required alongside --job-id to derive "
+        "subrun_id/field_index -- mutually exclusive with --subrun-id/--field-index",
+    )
 
     arg("--yaml-config", type=str, required=True, help="base specsims yaml config, matching local_spec_sims.py's own --yaml_config")
     arg("--json-config", type=str, required=True, help="base specsims json config (fields_T/traps_A/etc.), matching local_spec_sims.py's own --json_config")
@@ -166,7 +193,27 @@ def parse_args() -> argparse.Namespace:
         help="equivalent to passing every individual --keep-<x> flag above",
     )
 
-    return par.parse_args()
+    return par, par.parse_args()
+
+
+def resolve_subrun_and_field(par: argparse.ArgumentParser, args: argparse.Namespace) -> tuple[int, int]:
+    """Resolves (subrun_id, field_index) from whichever flag pair was given; crashes on a mix or a partial pair."""
+    direct_given = args.subrun_id is not None or args.field_index is not None
+    job_id_given = args.job_id is not None or args.num_fields is not None
+
+    if direct_given and job_id_given:
+        par.error("--subrun-id/--field-index and --job-id/--num-fields are mutually exclusive; got a mix of both")
+    if not direct_given and not job_id_given:
+        par.error("one of --subrun-id/--field-index or --job-id/--num-fields is required")
+
+    if direct_given:
+        if args.subrun_id is None or args.field_index is None:
+            par.error("--subrun-id and --field-index must be given together")
+        return args.subrun_id, args.field_index
+
+    if args.job_id is None or args.num_fields is None:
+        par.error("--job-id and --num-fields must be given together")
+    return args.job_id // args.num_fields, args.job_id % args.num_fields
 
 
 def compute_skip_steps(args: argparse.Namespace) -> frozenset[str]:
@@ -216,14 +263,15 @@ def build_step_fns(args: argparse.Namespace, noise_paths: list[str]) -> dict:
 
 
 def main() -> None:
-    args = parse_args()
+    par, args = parse_args()
+    subrun_id, field_index = resolve_subrun_and_field(par, args)
     init_logging(args.log_level, args.log_override)
 
     logger.info(
         "stage1_task starting: run_name=%s subrun_id=%s field_index=%s runs_dir=%s",
         args.run_name,
-        args.subrun_id,
-        args.field_index,
+        subrun_id,
+        field_index,
         args.runs_dir,
     )
 
@@ -241,12 +289,12 @@ def main() -> None:
     run_stage1_task(
         Path(args.runs_dir),
         args.run_name,
-        args.subrun_id,
-        args.field_index,
+        subrun_id,
+        field_index,
         build_step_fns(args, noise_paths),
         skip_steps=skip_steps,
     )
-    logger.info("stage1_task complete: run_name=%s subrun_id=%s field_index=%s", args.run_name, args.subrun_id, args.field_index)
+    logger.info("stage1_task complete: run_name=%s subrun_id=%s field_index=%s", args.run_name, subrun_id, field_index)
 
 
 if __name__ == "__main__":
