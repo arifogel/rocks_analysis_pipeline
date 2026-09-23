@@ -144,12 +144,14 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # keepcache=True below is needed for this cache to actually help: dnf deletes downloaded
-      # packages after a successful install by default.
+      # packages after a successful install by default. Keyed on a hash of this file (which is
+      # the only place the package list lives), matching "Cache downloaded .deb files (Linux)"
+      # above: a static key would never refresh if the package list itself changed.
       - name: Cache dnf packages
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: /var/cache/dnf
-          key: dnf-cache-almalinux9
+          key: dnf-cache-almalinux9-${{ hashFiles('.github/workflows/ci.yaml') }}
 
       # AlmaLinux is a RHEL-family Linux distribution, using dnf (and the EPEL and CRB add-on
       # repositories) rather than apt. gcc-c++ and git are not Katydid dependencies as such -
