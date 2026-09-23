@@ -218,4 +218,16 @@ py_binary(
     ],
 )
 
+py_binary(
+    name = "wulf_ssa",
+    srcs = [":wulf_ssa.py"],
+    data = ["//tools:run_via_warmed_runfiles.sh"],
+    main = ":wulf_ssa.py",
+    deps = [
+        ":logging_setup_lib",
+        ":rocks_utility_lib",
+        "@rules_python//python/runfiles",
+    ],
+)
+
 python_ide_backport()

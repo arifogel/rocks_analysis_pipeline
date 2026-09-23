@@ -1,4 +1,7 @@
 exports_files(
-    ["deps.bzl"],
+    [
+        "deps.bzl",
+        "run_via_warmed_runfiles.sh",
+    ],
     visibility = ["//:__subpackages__"],
 )
