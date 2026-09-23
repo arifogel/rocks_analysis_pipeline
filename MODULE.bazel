@@ -19,14 +19,14 @@ bazel_dep(name = "protobuf", version = "36.2")
 bazel_dep(name = "he6-cres-spec-sims", version = "0.2.0")
 git_override(
     module_name = "he6-cres-spec-sims",
-    commit = "a4061334b1513fd8ea51125335fd42fdb36fda74",  # main, as of 2026-09-22: "Validate renovate.json and try known good change (#6)"
+    commit = "fa717f166b210d5111071616ed031907e8f39301",  # main, as of 2026-09-22: "lockfile-sync.yaml: add **/*.bzl trigger (#7)"
     remote = "https://github.com/arifogel/he6-cres-spec-sims.git",
 )
 
 bazel_dep(name = "katydid", version = "0.1.0")
 git_override(
     module_name = "katydid",
-    commit = "bfb3dcd95a84f7d9382291b1718a8c167590e26d",  # main, as of 2026-09-22: "Fix missing AlmaLinux cache key and CI comment rewrite (#28)"
+    commit = "8ebdfea1acf5344113df128e405be3260db3087c",  # main, as of 2026-09-22: "ci.yaml: key the dnf package cache on this file's own hash (#31)"
     remote = "https://github.com/arifogel/katydid.git",
 )
 
