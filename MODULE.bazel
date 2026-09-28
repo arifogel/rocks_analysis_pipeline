@@ -13,7 +13,8 @@ python.toolchain(
     python_version = PYTHON_VERSION,
 )
 
-bazel_dep(name = "bazel_skylib", version = "1.9.2")
+# Only needed for the //:with_ghcss flag in BUILD.bazel, commented out alongside it.
+# bazel_dep(name = "bazel_skylib", version = "1.9.2")
 bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "aspect_rules_py", version = "1.12.1")
 bazel_dep(name = "protobuf", version = "36.2")
@@ -31,12 +32,16 @@ git_override(
     remote = "https://github.com/arifogel/katydid.git",
 )
 
-bazel_dep(name = "ghcss", version = "0.1.0")
-git_override(
-    module_name = "ghcss",
-    commit = "d53d21cafac02373e6044d9d588dce5a7936f448",  # main, as of 2026-09-22: "port he6-cres-spec-sims (#2)"
-    remote = "https://github.com/arifogel/ghcss.git",
-)
+# ghcss is a private repo; commented out so a plain `bazel build`/`bazel test` never needs to
+# fetch it (Bzlmod resolves every bazel_dep unconditionally, regardless of select()/target
+# reachability, so this can't be made conditional without a real module_extension - see
+# https://bazel.build/rules/lib/globals/module).
+# bazel_dep(name = "ghcss", version = "0.1.0")
+# git_override(
+#     module_name = "ghcss",
+#     commit = "d53d21cafac02373e6044d9d588dce5a7936f448",  # main, as of 2026-09-22: "port he6-cres-spec-sims (#2)"
+#     remote = "https://github.com/arifogel/ghcss.git",
+# )
 
 interpreters = use_extension("@aspect_rules_py//py/unstable:extension.bzl", "python_interpreters")
 interpreters.toolchain(
