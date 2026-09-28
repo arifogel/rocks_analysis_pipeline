@@ -1,4 +1,4 @@
-load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_library", "py_test")
+load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_image_layer", "py_library", "py_test")
 load("@pypi//:requirements.bzl", "requirement")
 load("//tools:deps.bzl", "cdeps", "python_ide_backport")
 
@@ -214,6 +214,14 @@ py_binary(
         ":stage2_merge_lib",
         "@rules_python//python/runfiles",
     ],
+)
+
+# Experiment: does py_image_layer materialize a real, relocatable copy of local_ssa's runfiles
+# (venv + @katydid//Source/Executables/Main:Katydid) suitable for a release tarball, or does it
+# still reference the build tree the way py_binary's own :local_ssa.venv symlink does?
+py_image_layer(
+    name = "local_ssa_layer",
+    binary = ":local_ssa",
 )
 
 py_binary(
