@@ -3,7 +3,8 @@ RUN dnf install -y --setopt=keepcache=True \
             gcc-c++ \
             git \
             wget \
-            tar
+            tar \
+            cpio
 # SSH setup
 RUN mkdir -p /root/.ssh && \
     ssh-keyscan github.com >> /root/.ssh/known_hosts && \
