@@ -1,3 +1,4 @@
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 
 sh_binary(
@@ -6,4 +7,20 @@ sh_binary(
     args = ["$(location @uv_bin//:uv)"],
     data = ["@uv_bin//:uv"],
     visibility = ["//visibility:private"],
+)
+
+# Gates every ghcss data dependency below //rocks_analysis_pipeline: off by default, so a plain
+# `bazel build //...`/`bazel test //...` never fetches or builds @ghcss (a private repo).
+# Independent of --use-ghcss, the runtime flag that picks whether to actually invoke it once
+# it's built in.
+bool_flag(
+    name = "with_ghcss",
+    build_setting_default = False,
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "ghcss_enabled",
+    flag_values = {":with_ghcss": "true"},
+    visibility = ["//visibility:public"],
 )

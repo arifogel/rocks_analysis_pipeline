@@ -51,7 +51,10 @@ py_binary(
         ":local_spec_sims.py",
         ":run_spec_sims_ghcss.py",
     ],
-    data = ["@ghcss//cmd/specsims"],
+    data = select({
+        "//:ghcss_enabled": ["@ghcss//cmd/specsims"],
+        "//conditions:default": [],
+    }),
     main = ":local_spec_sims.py",
     deps = cdeps([
         requirement("numpy"),
@@ -140,8 +143,18 @@ py_library(
 py_test(
     name = "stage1_steps_specsims_resolution_test",
     srcs = [":stage1_steps_specsims_resolution_test.py"],
-    data = ["@ghcss//cmd/specsims"],
+    data = select({
+        "//:ghcss_enabled": ["@ghcss//cmd/specsims"],
+        "//conditions:default": [],
+    }),
     main = ":stage1_steps_specsims_resolution_test.py",
+    # Its entire job is asserting the specsims binary resolves via runfiles, so it would just
+    # fail with the data dep above empty rather than meaningfully skip - excluded from //...
+    # wildcard expansion unless ghcss is actually built in.
+    tags = select({
+        "//:ghcss_enabled": [],
+        "//conditions:default": ["manual"],
+    }),
     deps = [
         ":stage1_steps_lib",
         "@rules_python//python/runfiles",
@@ -161,10 +174,10 @@ py_library(
 py_binary(
     name = "stage1_task",
     srcs = [":stage1_task.py"],
-    data = [
-        "@ghcss//cmd/specsims",
-        "@katydid//Source/Executables/Main:Katydid",
-    ],
+    data = ["@katydid//Source/Executables/Main:Katydid"] + select({
+        "//:ghcss_enabled": ["@ghcss//cmd/specsims"],
+        "//conditions:default": [],
+    }),
     main = ":stage1_task.py",
     deps = [
         ":noise_paths_lib",
@@ -204,10 +217,10 @@ py_binary(
     # for the full reasoning), not stage1_task's own py_binary as a
     # subprocess, so nothing bundles these in transitively the way a data
     # dependency on that py_binary used to.
-    data = [
-        "@ghcss//cmd/specsims",
-        "@katydid//Source/Executables/Main:Katydid",
-    ],
+    data = ["@katydid//Source/Executables/Main:Katydid"] + select({
+        "//:ghcss_enabled": ["@ghcss//cmd/specsims"],
+        "//conditions:default": [],
+    }),
     main = ":local_ssa.py",
     deps = [
         ":logging_setup_lib",

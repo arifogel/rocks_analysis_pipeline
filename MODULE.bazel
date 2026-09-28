@@ -13,6 +13,7 @@ python.toolchain(
     python_version = PYTHON_VERSION,
 )
 
+bazel_dep(name = "bazel_skylib", version = "1.9.2")
 bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "aspect_rules_py", version = "1.12.1")
 bazel_dep(name = "protobuf", version = "36.2")
@@ -26,7 +27,7 @@ git_override(
 bazel_dep(name = "katydid", version = "0.1.0")
 git_override(
     module_name = "katydid",
-    commit = "8ebdfea1acf5344113df128e405be3260db3087c",  # main, as of 2026-09-22: "ci.yaml: key the dnf package cache on this file's own hash (#31)"
+    commit = "a5ea0eb4bb89ddc364956b479aaf4f1290d3abb7",  # main, as of 2026-09-28: "Add CLAUDE.md style guide; apply repo-wide, tighten visibility, dedupe shared constants (#34)"
     remote = "https://github.com/arifogel/katydid.git",
 )
 
