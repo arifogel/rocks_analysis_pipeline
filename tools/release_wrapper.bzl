@@ -1,10 +1,11 @@
 """release_wrapper(): generates one entry point's release-tarball wrapper script."""
 
 def release_wrapper(name, venv_target_name, script_target_name):
-    """Generates a genrule producing "<script_target_name>.sh": a wrapper that activates
-    venv_target_name's shared, warmed venv and execs script_target_name in it, meant to sit
-    alongside release_venv_warmed/ and run_via_warmed_runfiles.sh in the assembled release
-    tarball.
+    """Generates a genrule producing "<script_target_name>.sh".
+
+    The generated script activates venv_target_name's shared, warmed venv and execs
+    script_target_name in it, meant to sit alongside release_venv_warmed/ and
+    run_via_warmed_runfiles.sh in the assembled release tarball.
 
     Args:
       name: this genrule's target name.
