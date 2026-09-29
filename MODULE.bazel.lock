@@ -367,19 +367,6 @@
         }
       }
     },
-    "@@katydid+//tools:katydid_release_repo.bzl%katydid_release": {
-      "general": {
-        "bzlTransitiveDigest": "Ni4Hq3MpbCWbV+3tezXC3eFyiWP25fBbYPSf4E/rh5c=",
-        "usagesDigest": "ytxHGtXwRavKhZnOCI3jQ0fdt6QBsxNG36TP1kKL2Wg=",
-        "recordedInputs": [],
-        "generatedRepoSpecs": {
-          "katydid_release": {
-            "repoRuleId": "@@katydid+//tools:katydid_release_repo.bzl%_katydid_release_repo",
-            "attributes": {}
-          }
-        }
-      }
-    },
     "@@katydid+//tools:macos_libs.bzl%macos_libs": {
       "general": {
         "bzlTransitiveDigest": "n4gAd3REr2jeor1VVvy7RmXYsGdRdCg9N0ktS51IeyI=",
