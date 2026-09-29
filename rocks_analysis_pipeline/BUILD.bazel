@@ -287,4 +287,28 @@ chmod +x $@
 """,
 )
 
+# The single release deliverable: :release_venv_warmed extracted under release_venv_warmed/,
+# alongside the wrapper scripts and run_via_warmed_runfiles.sh, re-tarred as one flat archive -
+# same shape as @katydid//:katydid_release, so it extracts and runs on a bare AlmaLinux host with
+# no Bazel present.
+genrule(
+    name = "release_tarball",
+    srcs = [
+        ":local_ssa_release_wrapper",
+        ":release_venv_warmed",
+        ":wulf_ssa_release_wrapper",
+        "//tools:run_via_warmed_runfiles.sh",
+    ],
+    outs = ["release.tar.gz"],
+    cmd = """
+set -euo pipefail
+STAGE="$$(mktemp -d)"
+mkdir -p "$$STAGE/release_venv_warmed"
+tar xf $(location :release_venv_warmed) -C "$$STAGE/release_venv_warmed"
+cp $(location :local_ssa_release_wrapper) $(location :wulf_ssa_release_wrapper) $(location //tools:run_via_warmed_runfiles.sh) "$$STAGE/"
+tar czf $@ -C "$$STAGE" .
+rm -rf "$$STAGE"
+""",
+)
+
 python_ide_backport()
