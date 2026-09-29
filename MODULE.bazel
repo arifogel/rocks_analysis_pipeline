@@ -46,6 +46,9 @@ git_override(
 #     remote = "https://github.com/arifogel/ghcss.git",
 # )
 
+rules_python_config = use_extension("@rules_python//python/extensions:config.bzl", "config")
+rules_python_config.explicit_init_py(default = True)
+
 interpreters = use_extension("@aspect_rules_py//py/unstable:extension.bzl", "python_interpreters")
 interpreters.toolchain(
     is_default = True,

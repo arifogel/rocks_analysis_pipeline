@@ -3,6 +3,19 @@ load("@pypi//:requirements.bzl", "requirement")
 load("//tools:deps.bzl", "cdeps", "python_ide_backport")
 load("//tools:release_tarball.bzl", "release_tarball")
 
+# Explicit __init__.py for this package and its api/ subpackage (api/v1/ has its own, see that
+# package's BUILD.bazel) - rules_python's implicit creation is deprecated
+# (https://github.com/bazel-contrib/rules_python/issues/2945) and disabled repo-wide via
+# rules_python_config.explicit_init_py in MODULE.bazel, so every target below depends on this
+# directly or transitively instead of relying on it.
+py_library(
+    name = "package_init_lib",
+    srcs = [
+        "__init__.py",
+        "api/__init__.py",
+    ],
+)
+
 py_binary(
     name = "sbatch_spec_sims",
     srcs = [":sbatch_spec_sims.py"],
@@ -16,7 +29,7 @@ py_binary(
         requirement("pyyaml"),
         requirement("scikit-learn"),
         requirement("uproot"),
-    ]),
+    ]) + [":package_init_lib"],
 )
 
 py_library(
@@ -31,7 +44,10 @@ py_library(
         requirement("pyyaml"),
         requirement("scikit-learn"),
         requirement("uproot"),
-    ]) + ["@he6-cres-spec-sims//src/he6_cres_spec_sims"],
+    ]) + [
+        ":package_init_lib",
+        "@he6-cres-spec-sims//src/he6_cres_spec_sims",
+    ],
 )
 
 py_binary(
@@ -44,6 +60,7 @@ py_binary(
 py_library(
     name = "logging_setup_lib",
     srcs = ["logging_setup.py"],
+    deps = [":package_init_lib"],
 )
 
 py_binary(
@@ -90,6 +107,7 @@ py_binary(
 py_library(
     name = "checkpoints_lib",
     srcs = ["checkpoints.py"],
+    deps = [":package_init_lib"],
 )
 
 py_library(
@@ -133,6 +151,7 @@ py_library(
         "//rocks_analysis_pipeline/api/v1:point_py_pb2",
         "//rocks_analysis_pipeline/api/v1:slew_times_py_pb2",
         "//rocks_analysis_pipeline/api/v1:task_identity_py_pb2",
+        "//rocks_analysis_pipeline/api/v1:v1_init_lib",
         "@he6-cres-spec-sims//src/he6_cres_spec_sims",
         "@rules_python//python/runfiles",
     ],
@@ -179,6 +198,7 @@ py_library(
         "//rocks_analysis_pipeline/api/v1:dmtrack_py_pb2",
         "//rocks_analysis_pipeline/api/v1:event_py_pb2",
         "//rocks_analysis_pipeline/api/v1:point_py_pb2",
+        "//rocks_analysis_pipeline/api/v1:v1_init_lib",
     ],
 )
 
