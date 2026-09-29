@@ -1,6 +1,7 @@
-load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_image_layer", "py_library", "py_test")
+load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_library", "py_test")
 load("@pypi//:requirements.bzl", "requirement")
 load("//tools:deps.bzl", "cdeps", "python_ide_backport")
+load("//tools:warm_py_binary.bzl", "warm_py_binary")
 
 py_binary(
     name = "sbatch_spec_sims",
@@ -249,15 +250,41 @@ py_binary(
     ],
 )
 
-# Materializes release_venv's own runfiles (the shared venv, local_ssa.py, wulf_ssa.py, and
-# @katydid//release:katydid) into a real, relocatable release layer - unlike py_binary's own
-# :release_venv.venv symlink, which only points back into the build tree. @katydid//release:katydid
-# is a plain sh_binary + data (see @katydid//release:BUILD.bazel), not a linked cc_binary, so
-# nothing here needs to survive Bazel's solib-farm symlink dereferencing the way
-# @katydid//Source/Executables/Main:Katydid's ROOT runtime dependency would.
-py_image_layer(
-    name = "release_venv_layer",
+# The actual pre-warmed, relocatable venv + runfiles for the release build - see
+# //tools:warm_py_binary.bzl. Supersedes py_image_layer for this purpose: py_image_layer only
+# packages release_venv's own lazy first-run launcher, never a materialized venv.
+warm_py_binary(
+    name = "release_venv_warmed",
     binary = ":release_venv",
+)
+
+# Tiny per-entry-point wrapper scripts around //tools:run_via_warmed_runfiles.sh, meant to sit
+# alongside :release_venv_warmed and run_via_warmed_runfiles.sh itself in the assembled release
+# tarball: each just activates :release_venv_warmed's shared venv and execs its own script.
+genrule(
+    name = "local_ssa_release_wrapper",
+    outs = ["local_ssa.sh"],
+    cmd = """cat > $@ << 'WRAPPER_EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+DIR="$$(cd "$$(dirname "$${BASH_SOURCE[0]}")" && pwd)"
+RUNFILES_DIR="$$DIR/release_venv_warmed" exec "$$DIR/run_via_warmed_runfiles.sh" release_venv local_ssa "$$@"
+WRAPPER_EOF
+chmod +x $@
+""",
+)
+
+genrule(
+    name = "wulf_ssa_release_wrapper",
+    outs = ["wulf_ssa.sh"],
+    cmd = """cat > $@ << 'WRAPPER_EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+DIR="$$(cd "$$(dirname "$${BASH_SOURCE[0]}")" && pwd)"
+RUNFILES_DIR="$$DIR/release_venv_warmed" exec "$$DIR/run_via_warmed_runfiles.sh" release_venv wulf_ssa "$$@"
+WRAPPER_EOF
+chmod +x $@
+""",
 )
 
 python_ide_backport()
