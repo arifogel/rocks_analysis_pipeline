@@ -218,17 +218,6 @@ py_binary(
     deps = [":local_ssa_entry_lib"],
 )
 
-# Materializes local_ssa's own runfiles (venv + @katydid//release:katydid) into a real,
-# relocatable release layer - unlike py_binary's own :local_ssa.venv symlink, which only points
-# back into the build tree. @katydid//release:katydid is a plain sh_binary + data (see
-# @katydid//release:BUILD.bazel), not a linked cc_binary, so nothing here needs to survive
-# Bazel's solib-farm symlink dereferencing the way @katydid//Source/Executables/Main:Katydid's
-# ROOT runtime dependency would.
-py_image_layer(
-    name = "local_ssa_layer",
-    binary = ":local_ssa",
-)
-
 py_library(
     name = "wulf_ssa_entry_lib",
     srcs = ["wulf_ssa.py"],
@@ -258,6 +247,17 @@ py_binary(
         ":local_ssa_entry_lib",
         ":wulf_ssa_entry_lib",
     ],
+)
+
+# Materializes release_venv's own runfiles (the shared venv, local_ssa.py, wulf_ssa.py, and
+# @katydid//release:katydid) into a real, relocatable release layer - unlike py_binary's own
+# :release_venv.venv symlink, which only points back into the build tree. @katydid//release:katydid
+# is a plain sh_binary + data (see @katydid//release:BUILD.bazel), not a linked cc_binary, so
+# nothing here needs to survive Bazel's solib-farm symlink dereferencing the way
+# @katydid//Source/Executables/Main:Katydid's ROOT runtime dependency would.
+py_image_layer(
+    name = "release_venv_layer",
+    binary = ":release_venv",
 )
 
 python_ide_backport()
