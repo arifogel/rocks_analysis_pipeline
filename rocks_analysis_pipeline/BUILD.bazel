@@ -235,14 +235,20 @@ py_library(
     ],
 )
 
-py_binary(
-    name = "stage2_merge_task",
-    srcs = [":stage2_merge_task.py"],
-    main = ":stage2_merge_task.py",
+py_library(
+    name = "stage2_merge_task_lib",
+    srcs = ["stage2_merge_task.py"],
     deps = [
         ":logging_setup_lib",
         ":stage2_merge_lib",
     ],
+)
+
+py_binary(
+    name = "stage2_merge_task",
+    srcs = [":stage2_merge_task.py"],
+    main = ":stage2_merge_task.py",
+    deps = [":stage2_merge_task_lib"],
 )
 
 py_library(
@@ -280,6 +286,10 @@ py_library(
     deps = [
         ":logging_setup_lib",
         ":rocks_utility_lib",
+        # wulf_ssa invokes stage2_merge_task in-venv via run_via_warmed_runfiles.sh, so
+        # stage2_merge_task.py needs to be part of release_venv's runfiles tree too -- nothing
+        # else release_venv depends on pulls it in.
+        ":stage2_merge_task_lib",
         "@rules_python//python/runfiles",
     ],
 )
