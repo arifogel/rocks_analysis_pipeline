@@ -44,6 +44,7 @@ currently targets a newer version.
 """
 
 import argparse
+import os
 import re
 import subprocess as sp
 import sys
@@ -345,10 +346,10 @@ def build_katydid_command(row: pd.Series, katydid_path: str, noise_paths: list[s
 def resolve_katydid_path() -> str:
     r = runfiles.Create()
     katydid_path = r.Rlocation(KATYDID_RLOCATION)
-    if katydid_path is None or not Path(katydid_path).is_file():
+    if katydid_path is None or not Path(katydid_path).is_file() or not os.access(katydid_path, os.X_OK):
         raise RuntimeError(
-            f"Could not resolve the katydid binary via runfiles at "
-            f"'{KATYDID_RLOCATION}' (got: {katydid_path}). If the "
+            f"Could not resolve an executable katydid binary via runfiles "
+            f"at '{KATYDID_RLOCATION}' (got: {katydid_path}). If the "
             f"canonical repo name for the katydid module has changed, "
             f"update KATYDID_RLOCATION at the top of this file."
         )

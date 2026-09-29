@@ -19,6 +19,7 @@ layout (SPECSIMS_CONFIG_FILENAME, ROOT_FILENAME, etc. below).
 
 import json
 import logging
+import os
 import shutil
 import subprocess
 import warnings
@@ -40,7 +41,7 @@ from rocks_analysis_pipeline.stage1_state import parse_task_dir
 logger = logging.getLogger(__name__)
 
 SPECSIMS_RLOCATION = "ghcss+/cmd/specsims/specsims_/specsims"  # matches local_spec_sims.py's own constant
-KATYDID_RLOCATION = "katydid+/Source/Executables/Main/Katydid"  # matches local_ssa_katydid.py's own constant
+KATYDID_RLOCATION = "katydid+/release/katydid.sh"  # matches local_ssa_katydid.py's own constant
 
 SPECSIMS_LOG_FILENAME = "specsims.log"
 COMPRESSED_SPECSIMS_LOG_FILENAME = SPECSIMS_LOG_FILENAME + ".zst"
@@ -259,10 +260,10 @@ def resolve_katydid_path() -> str:
     the same reason as resolve_specsims_path above."""
     r = runfiles.Create()
     katydid_path = r.Rlocation(KATYDID_RLOCATION)
-    if katydid_path is None or not Path(katydid_path).is_file():
+    if katydid_path is None or not Path(katydid_path).is_file() or not os.access(katydid_path, os.X_OK):
         raise RuntimeError(
-            f"Could not resolve the katydid binary via runfiles at "
-            f"'{KATYDID_RLOCATION}' (got: {katydid_path}). If the "
+            f"Could not resolve an executable katydid binary via runfiles "
+            f"at '{KATYDID_RLOCATION}' (got: {katydid_path}). If the "
             f"canonical repo name for the katydid module has changed, "
             f"update KATYDID_RLOCATION at the top of this file."
         )
