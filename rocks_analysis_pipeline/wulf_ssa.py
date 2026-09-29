@@ -135,6 +135,18 @@ def resolve_launcher_path() -> str:
     return r.Rlocation("_main/tools/run_via_warmed_runfiles.sh")
 
 
+def resolve_runfiles_dir(launcher_path: str) -> str:
+    """release_venv_warmed/'s own path, three parents up from launcher_path's
+    own _main/tools/run_via_warmed_runfiles.sh: passed to
+    run_via_warmed_runfiles.sh explicitly in every submitted job, since wulf
+    only ever runs this from an extracted release tarball on a filesystem
+    every compute node mounts at the same location, never from a bazel
+    checkout in non-dry-run mode -- run_via_warmed_runfiles.sh's own
+    bazel-bin-relative fallback derivation has nothing to find there.
+    """
+    return str(Path(launcher_path).parent.parent.parent)
+
+
 def build_jobs_and_num_fields(args: argparse.Namespace) -> tuple[list[dict[str, Any]], int]:
     """Enumerates every (subrun_id, field_index) task for this run, and
     returns num_fields alongside it: stage1_task.py's own --job-id/
@@ -154,10 +166,12 @@ def build_jobs_and_num_fields(args: argparse.Namespace) -> tuple[list[dict[str, 
     return jobs, num_fields
 
 
-def build_map_command(launcher_path: str, args: argparse.Namespace, num_fields: int) -> str:
+def build_map_command(launcher_path: str, runfiles_dir: str, args: argparse.Namespace, num_fields: int) -> str:
     """Builds the shell command each map task runs."""
     parts = [
+        f"RUNFILES_DIR={shlex.quote(runfiles_dir)}",
         shlex.quote(launcher_path),
+        "release_venv",
         "stage1_task",
         shlex.quote(f"--runs-dir={args.runs_dir}"),
         shlex.quote(f"--run-name={args.run_name}"),
@@ -199,10 +213,12 @@ def build_map_command(launcher_path: str, args: argparse.Namespace, num_fields: 
     return " ".join(parts)
 
 
-def build_reduce_command(launcher_path: str, args: argparse.Namespace) -> str:
+def build_reduce_command(launcher_path: str, runfiles_dir: str, args: argparse.Namespace) -> str:
     """Builds the shell command the reduce job runs."""
     parts = [
+        f"RUNFILES_DIR={shlex.quote(runfiles_dir)}",
         shlex.quote(launcher_path),
+        "release_venv",
         "stage2_merge_task",
         shlex.quote(f"--runs-dir={args.runs_dir}"),
         shlex.quote(f"--run-name={args.run_name}"),
@@ -215,7 +231,7 @@ def build_reduce_command(launcher_path: str, args: argparse.Namespace) -> str:
     return " ".join(parts)
 
 
-def submit_map(launcher_path: str, args: argparse.Namespace, num_jobs: int, num_fields: int) -> str:
+def submit_map(launcher_path: str, runfiles_dir: str, args: argparse.Namespace, num_jobs: int, num_fields: int) -> str:
     """Submits every map task as one Slurm job array, returning its own
     primary job id (sbatch_job's own --parsable).
     """
@@ -229,7 +245,7 @@ def submit_map(launcher_path: str, args: argparse.Namespace, num_jobs: int, num_
     # usual.
     log_path = slurm_log_dir / "map_%A_%a.log"
 
-    cmd = build_map_command(launcher_path, args, num_fields)
+    cmd = build_map_command(launcher_path, runfiles_dir, args, num_fields)
     proc = sbatch_job(
         cmd=cmd,
         job_name=f"{args.run_name}_map",
@@ -240,13 +256,13 @@ def submit_map(launcher_path: str, args: argparse.Namespace, num_jobs: int, num_
     return proc.stdout.strip()
 
 
-def submit_reduce(launcher_path: str, args: argparse.Namespace, map_job_id: str) -> str:
+def submit_reduce(launcher_path: str, runfiles_dir: str, args: argparse.Namespace, map_job_id: str) -> str:
     """Submits the reduce job, with --dependency=afterok:<map_job_id>."""
     slurm_log_dir = Path(args.runs_dir) / args.run_name / "slurm_logs"
     slurm_log_dir.mkdir(parents=True, exist_ok=True)
     log_path = slurm_log_dir / "reduce_%j.log"
 
-    cmd = build_reduce_command(launcher_path, args)
+    cmd = build_reduce_command(launcher_path, runfiles_dir, args)
     proc = sbatch_job(
         cmd=cmd,
         job_name=f"{args.run_name}_reduce",
@@ -265,16 +281,17 @@ def main() -> None:
     logger.info("Enumerated %d task(s) (%d subrun(s) x %d field(s))", len(jobs), args.num_subruns, num_fields)
 
     launcher_path = resolve_launcher_path()
+    runfiles_dir = resolve_runfiles_dir(launcher_path)
 
     if args.dry_run:
-        logger.info("[dry_run] map command:\n%s", build_map_command(launcher_path, args, num_fields))
-        logger.info("[dry_run] reduce command:\n%s", build_reduce_command(launcher_path, args))
+        logger.info("[dry_run] map command:\n%s", build_map_command(launcher_path, runfiles_dir, args, num_fields))
+        logger.info("[dry_run] reduce command:\n%s", build_reduce_command(launcher_path, runfiles_dir, args))
         return
 
-    map_job_id = submit_map(launcher_path, args, len(jobs), num_fields)
+    map_job_id = submit_map(launcher_path, runfiles_dir, args, len(jobs), num_fields)
     logger.info("submitted the simulation+analysis job array %s (%d tasks)", map_job_id, len(jobs))
 
-    reduce_job_id = submit_reduce(launcher_path, args, map_job_id)
+    reduce_job_id = submit_reduce(launcher_path, runfiles_dir, args, map_job_id)
     logger.info("submitted the merge job %s (runs after %s completes)", reduce_job_id, map_job_id)
 
 
