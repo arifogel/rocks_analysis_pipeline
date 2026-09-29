@@ -44,7 +44,6 @@ currently targets a newer version.
 """
 
 import argparse
-import os
 import re
 import subprocess as sp
 import sys
@@ -57,7 +56,8 @@ import he6_cres_spec_sims.spec_tools.spec_calc.spec_calc as sc
 import numpy as np
 import pandas as pd
 import yaml
-from python.runfiles import runfiles
+
+from rocks_analysis_pipeline.runfiles_resolve import resolve_executable
 
 KATYDID_RLOCATION = "katydid+/release/katydid.sh"
 
@@ -344,19 +344,8 @@ def build_katydid_command(row: pd.Series, katydid_path: str, noise_paths: list[s
 
 
 def resolve_katydid_path() -> str:
-    """Resolves Katydid's real path via runfiles, and confirms it's an executable file."""
-    r = runfiles.Create()
-    katydid_path = r.Rlocation(KATYDID_RLOCATION)
-    if katydid_path is None:
-        raise RuntimeError(
-            f"Runfiles has no mapping for '{KATYDID_RLOCATION}'. If the canonical repo name for "
-            f"the katydid module has changed, update KATYDID_RLOCATION at the top of this file."
-        )
-    if not Path(katydid_path).is_file():
-        raise RuntimeError(f"Resolved katydid path '{katydid_path}' does not exist.")
-    if not os.access(katydid_path, os.X_OK):
-        raise RuntimeError(f"Resolved katydid path '{katydid_path}' is not executable.")
-    return katydid_path
+    """Resolves Katydid's real path via runfiles."""
+    return resolve_executable(KATYDID_RLOCATION)
 
 
 def _run_one_job(params: dict) -> None:

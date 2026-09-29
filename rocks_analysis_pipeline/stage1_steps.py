@@ -19,7 +19,6 @@ layout (SPECSIMS_CONFIG_FILENAME, ROOT_FILENAME, etc. below).
 
 import json
 import logging
-import os
 import shutil
 import subprocess
 import warnings
@@ -32,10 +31,10 @@ import numpy as np
 import pandas as pd
 import uproot
 import yaml
-from python.runfiles import runfiles
 
 from rocks_analysis_pipeline.api.v1 import band_pb2, dmtrack_pb2, event_pb2, point_pb2, slew_times_pb2, task_identity_pb2
 from rocks_analysis_pipeline.logging_setup import base_fmt
+from rocks_analysis_pipeline.runfiles_resolve import resolve_executable
 from rocks_analysis_pipeline.stage1_state import parse_task_dir
 
 logger = logging.getLogger(__name__)
@@ -71,15 +70,12 @@ SLEW_TIMES_PROTO_FILENAME = "slew_times.pb.zst"
 
 # Katydid's top-level tree name (see KTROOTTreeTypeWriterEventAnalysis.cc's
 # WriteMultiBandEvent). "MultiBandEvent" and "fTracks" are nested sub-branches *within* this
-# tree, reached via chained indexing (see run_events_proto_conversion's doc comment for why),
-# not a slash-joined top-level tree path.
+# tree, reached via chained indexing, not a slash-joined top-level tree path.
 MB_EVENTS_TREE_NAME = "MB-events"
 
-# Katydid's own standalone long-track-finder output tree -- a different,
-# separate tree from MB_EVENTS_TREE_NAME above (see point.proto's own doc
-# comment on the distinction: this is where run_points_proto_conversion's
-# own per-point Point data lives, event.proto's own per-event Event data
-# does not).
+# Katydid's standalone long-track-finder output tree, separate from MB_EVENTS_TREE_NAME above
+# (see point.proto's doc comment on the distinction: Point's per-point data lives here, Event's
+# per-event data does not).
 KATYDID_TRACKS_TREE_NAME = "tracks"
 
 
@@ -173,7 +169,7 @@ def _write_proto_zst(message, path: Path) -> None:
 def run_bands_proto_conversion(task_dir: Path) -> None:
     """bands.csv -> BandList -> bands.pb.zst. Column names in the CSV (see band.proto's doc
     comment) already match Band's snake_case field names exactly, so no column-name mapping
-    is needed, unlike run_events_proto_conversion.
+    is needed.
     """
     csv_path = task_dir / SPECSIMS_OUTPUT_DIRNAME / BANDS_CSV_FILENAME
     df = pd.read_csv(csv_path, index_col=0)
@@ -228,60 +224,28 @@ def delete_mc_truth(task_dir: Path) -> None:
 
 
 def resolve_specsims_path() -> str:
-    """Resolves the ghcss specsims binary's real path via runfiles.
-
-    Duplicated rather than imported: the existing implementation lives in a py_binary, not a
-    py_library, and this project's established pattern is to duplicate a small, self-contained
-    piece rather than refactor a working entry point into a library it was never designed to be.
-    """
-    r = runfiles.Create()
-    specsims_path = r.Rlocation(SPECSIMS_RLOCATION)
-    if specsims_path is None or not Path(specsims_path).is_file():
-        raise RuntimeError(
-            f"Could not resolve the ghcss specsims binary via runfiles at "
-            f"'{SPECSIMS_RLOCATION}' (got: {specsims_path}). If the "
-            f"canonical repo name for the ghcss module, or the go_binary's "
-            f"own runfile path, has changed, update SPECSIMS_RLOCATION at "
-            f"the top of this file."
-        )
-    return specsims_path
+    """Resolves the ghcss specsims binary's real path via runfiles."""
+    return resolve_executable(SPECSIMS_RLOCATION)
 
 
 def resolve_katydid_path() -> str:
-    """Resolves Katydid's real path via runfiles, and confirms it's an executable file.
-
-    Duplicated rather than imported, for the same reason as resolve_specsims_path above.
-    """
-    r = runfiles.Create()
-    katydid_path = r.Rlocation(KATYDID_RLOCATION)
-    if katydid_path is None:
-        raise RuntimeError(
-            f"Runfiles has no mapping for '{KATYDID_RLOCATION}'. If the canonical repo name for "
-            f"the katydid module has changed, update KATYDID_RLOCATION at the top of this file."
-        )
-    if not Path(katydid_path).is_file():
-        raise RuntimeError(f"Resolved katydid path '{katydid_path}' does not exist.")
-    if not os.access(katydid_path, os.X_OK):
-        raise RuntimeError(f"Resolved katydid path '{katydid_path}' is not executable.")
-    return katydid_path
+    """Resolves Katydid's real path via runfiles."""
+    return resolve_executable(KATYDID_RLOCATION)
 
 
 def get_slope(true_field: float, frequency: float = 19.15e9) -> float:
-    """Duplicated rather than imported, for the same reason as resolve_specsims_path above."""
     approx_power = sc.power_larmor(true_field, frequency)
     approx_energy = sc.freq_to_energy(frequency, true_field)
     return sc.df_dt(approx_energy, true_field, approx_power)
 
 
-# The only Katydid processor type whose Configure() reads a "set-field" key. Duplicated rather
-# than imported, for the same reason as resolve_specsims_path above.
+# The only Katydid processor type whose Configure() reads a "set-field" key.
 KATYDID_SET_FIELD_PROCESSOR_TYPES = frozenset({"multi-band-event-builder"})
 
 
 def render_katydid_config(base_config_path: str, true_field: float, output_path: Path) -> None:
     """Writes a copy of base_config_path with every KATYDID_SET_FIELD_PROCESSOR_TYPES processor
-    instance's set-field set to true_field. Duplicated rather than imported, for the same reason
-    as resolve_specsims_path above."""
+    instance's set-field set to true_field."""
     with open(base_config_path) as f:
         config_dict = yaml.load(f, Loader=yaml.FullLoader)
 
@@ -308,10 +272,6 @@ def render_specsims_config(task_dir: Path, yaml_config: str, json_config: str, i
     noise_paths is written to yaml_dict["DAQ"]["noise_paths"] unconditionally: a resolved
     noise_paths value is always available by the time this runs (see
     resolve_noise_paths_from_id), so there's no case where it should be omitted.
-
-    Split out from make_run_specsims's closure so this half -- the part with real, checkable
-    logic -- is directly testable without needing to import or run he6_cres_spec_sims/ghcss at
-    all.
     """
     run_name, subrun_id, field_index = parse_task_dir(task_dir)
     seed = initial_seed + subrun_id
@@ -385,22 +345,15 @@ def make_run_specsims(
     scoping reason, so nothing from this call also reaches a root-level
     handler if one happens to exist.
 
-    This is the *only* logging setup this function does. Which messages
-    actually get emitted (the level, and any per-logger overrides) is
-    deliberately not this function's concern at all -- that's root-level
-    config, set once via logging_setup.init_logging at process startup,
-    not threaded through here. That's not just simpler, it's correct on
-    its own: "he6_cres_spec_sims" has no explicit level set
-    anywhere in this function, so it inherits its effective level from
-    root by Python's normal logging hierarchy rules regardless of
-    propagate=False -- propagate only controls whether an emitted record
-    also reaches an ancestor's handler, not whether the logger decides to
-    emit the record in the first place, so inheritance from root still
-    applies. A root level of INFO (this project's default log level)
-    keeps he6-cres-spec-sims's per-chunk debug lines (one specific
-    line fires ~146,500 times per acquisition) suppressed by default,
-    resolved through inheritance rather than a redundant,
-    separately-threaded copy of the same setting.
+    This is the *only* logging setup this function does. Which messages actually get emitted
+    (the level, and any per-logger overrides) is root-level config, set once via
+    logging_setup.init_logging at process startup. "he6_cres_spec_sims" has no explicit level
+    set anywhere in this function, so it inherits its effective level from root by Python's
+    normal logging hierarchy rules regardless of propagate=False -- propagate only controls
+    whether an emitted record also reaches an ancestor's handler, not whether the logger emits
+    the record in the first place. A root level of INFO (this project's default log level) keeps
+    he6-cres-spec-sims's per-chunk debug lines (one specific line fires ~146,500 times per
+    acquisition) suppressed by default through that inheritance.
 
     Also bridges the warnings module (numpy/scipy's own RuntimeWarning
     etc., which bypass logging entirely by default) into the same log
@@ -504,12 +457,8 @@ def delete_specsims_output(task_dir: Path) -> None:
 
 def build_katydid_command_for_task(task_dir: Path, katydid_path: str, katydid_config: str, noise_paths: list[str]) -> list[str]:
     """Builds the Katydid command line for this task: renders a copy of katydid_config with
-    set-field set to this task's true_field (see render_katydid_config's doc comment),
-    then builds the full command against the two .speck files this task's specsims run
-    produced.
-
-    Split out from make_run_katydid's closure so this half -- the part with real, checkable
-    logic -- is directly testable without needing a real katydid_path or to actually invoke it.
+    set-field set to this task's true_field (see render_katydid_config), then builds the full
+    command against the two .speck files this task's specsims run produced.
     """
     identity = _task_identity(task_dir)
     true_field = identity.true_field
@@ -595,23 +544,21 @@ def run_events_proto_conversion(task_dir: Path) -> None:
     output) holds pre-event-building long-track candidates, a genuinely
     different dataset from the post-event-building tracks kept in each
     MultiBandEvent (see point.proto's Point message for that separate
-    tree's data, extracted by run_points_proto_conversion below).
+    tree's data).
 
     Each scalar per-track branch is named "fTracks.f<Name>" (e.g.
-    "fTracks.fTrackId"); branch_to_field's own keys are already the
+    "fTracks.fTrackId"); branch_to_field's keys are already the
     stripped form ("TrackId"). The nested, jagged fPoints sub-array
     (per-point data within each track -- a separate, more granular
     dataset) is skipped via its AsObjects interpretation.
 
-    Flattening uses np.concatenate over each field's own per-event jagged
+    Flattening uses np.concatenate over each field's per-event jagged
     sub-arrays (bulk numpy, no pandas).
 
-    Unlike bands.csv/dmtracks.csv, ROOT branch names are PascalCase
-    (TrackId, BandNumber, ...) while Event's own proto field names are
-    snake_case (track_id, band_number, ...), so this needs an explicit
-    name mapping rather than a positional or same-name correspondence.
-    UniqueID/Bits (ROOT's own TObject bookkeeping, not Katydid data -- see
-    event.proto's own doc comment) are simply not in this mapping, so
+    ROOT branch names are PascalCase (TrackId, BandNumber, ...) while Event's proto field names
+    are snake_case (track_id, band_number, ...), so this needs an explicit name mapping rather
+    than a positional or same-name correspondence. UniqueID/Bits (ROOT's TObject bookkeeping,
+    not Katydid data -- see event.proto's doc comment) are simply not in this mapping, so
     they're dropped by omission -- along with fPoints, they're the only
     branches this leaves unread.
     """
@@ -686,23 +633,18 @@ def run_points_proto_conversion(task_dir: Path) -> None:
     """track.root -> PointList -> points.pb.zst, reading the .root file
     directly via uproot.
 
-    Reads from the standalone "tracks" tree (KATYDID_TRACKS_TREE_NAME) --
-    Katydid's own WriteLongTrack output, a genuinely different, separate
-    tree from run_events_proto_conversion's own "MB-events" (see
-    point.proto's own doc comment on the naming distinction) --
-    specifically the nested Track/fPoints/f* branches (Point's own
-    per-point member fields, TClonesArray-nested within each
-    TLongTrackData entry). uproot's key format here uses a "/" for
-    structural sub-branch nesting (Track/fPoints/...) and a "." for the
-    innermost, dotted C++ member name (...fPoints.f<Name>), different from
-    run_events_proto_conversion's "MB-events" extraction (a uniform
-    "fTracks.f" prefix strip).
+    Reads from the standalone "tracks" tree (KATYDID_TRACKS_TREE_NAME) -- Katydid's
+    WriteLongTrack output, a tree separate from the post-event-building tracks kept in each
+    event (see point.proto's doc comment on the distinction) -- specifically the nested
+    Track/fPoints/f* branches (Point's per-point member fields, TClonesArray-nested within each
+    TLongTrackData entry). uproot's key format here uses a "/" for structural sub-branch nesting
+    (Track/fPoints/...) and a "." for the innermost, dotted C++ member name (...fPoints.f<Name>).
 
-    track_id is the real TrackId field, not a synthetic per-file index --
-    see point.proto's own doc comment for why that's correct for this
-    pipeline's one-acquisition-per-task architecture.
+    track_id is the real TrackId field, not a synthetic per-file index -- see point.proto's doc
+    comment for why that's correct for this pipeline's one-acquisition-per-task architecture.
 
-    Flattening uses np.concatenate, the same as run_events_proto_conversion's doc comment.
+    Flattening uses np.concatenate over each field's per-event jagged sub-arrays (bulk numpy, no
+    pandas).
     """
     branch_to_field = {
         "TrackId": "track_id",

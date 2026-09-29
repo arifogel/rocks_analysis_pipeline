@@ -64,6 +64,15 @@ py_library(
     deps = [":package_init_lib"],
 )
 
+py_library(
+    name = "runfiles_resolve_lib",
+    srcs = ["runfiles_resolve.py"],
+    deps = [
+        ":package_init_lib",
+        "@rules_python//python/runfiles",
+    ],
+)
+
 py_binary(
     name = "local_spec_sims",
     srcs = [
@@ -91,7 +100,7 @@ py_binary(
     main = ":local_ssa_katydid.py",
     deps = [
         ":rocks_utility_lib",
-        "@rules_python//python/runfiles",
+        ":runfiles_resolve_lib",
     ],
 )
 
@@ -148,6 +157,7 @@ py_library(
     ]) + [
         ":logging_setup_lib",
         ":noise_paths_lib",
+        ":runfiles_resolve_lib",
         ":stage1_state_lib",
         "//rocks_analysis_pipeline/api/v1:band_py_pb2",
         "//rocks_analysis_pipeline/api/v1:dmtrack_py_pb2",
@@ -157,7 +167,6 @@ py_library(
         "//rocks_analysis_pipeline/api/v1:task_identity_py_pb2",
         "//rocks_analysis_pipeline/api/v1:v1_init_lib",
         "@he6-cres-spec-sims//src/he6_cres_spec_sims",
-        "@rules_python//python/runfiles",
     ],
 )
 
