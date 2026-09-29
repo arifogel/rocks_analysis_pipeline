@@ -7,12 +7,16 @@ own runfiles symlinks point into the action's sandbox or external-repo cache, ne
 relocated - the same fix that makes @katydid//release:katydid portable), runs the copied launcher
 against that copy to force its lazily-created venv into existence there, lays extra_files (release
 wrapper scripts, run_via_warmed_runfiles.sh) alongside under release_venv_warmed/'s own parent
-directory, and tars the whole thing as this target's one output. Since the copy is already
-portable before binary ever runs, whatever symlinks venv creation itself adds (its interpreter,
-its own multiple bin/pythonX names) point within that same local tree and need no further
-dereferencing - left as symlinks in the final tar, rather than dereferencing the whole tree a
-second time, so the bytes of any file several of the venv's own symlinks point at aren't
-duplicated.
+directory, and tars the whole thing as this target's one output.
+
+Venv creation itself (uv, under the hood) adds its own symlinks - the interpreter, per-file entries
+for individually-linked packages - as absolute paths into the action's own $(mktemp -d) staging
+directory, not relative ones: confirmed directly, not assumed, via a real extracted release
+(pyvenv.cfg's own `home` line and bin/python pointed at a dead /tmp/tmp.* path). Every symlink
+whose target lies inside that staging directory is rewritten to a relative one before tarring, so
+it still resolves correctly wherever the tarball ends up extracted; a symlink pointing outside the
+staging directory entirely would be a real, separate problem (none were found empirically for this
+binary) and is left untouched here rather than silently masked.
 """
 
 def _release_tarball_impl(ctx):
@@ -34,6 +38,16 @@ cp -aL '{binary}' "$STAGE/{name}"
 cp -aL '{runfiles}' "$STAGE/{name}.runfiles"
 "$STAGE/{name}" >/dev/null
 rm -f "$STAGE/{name}"
+find "$STAGE" -type l -print0 | while IFS= read -r -d '' link; do
+  target="$(readlink "$link")"
+  case "$target" in
+    "$STAGE"/*)
+      dir="$(dirname "$link")"
+      rel="$(realpath --relative-to="$dir" "$target")"
+      ln -sfn "$rel" "$link"
+      ;;
+  esac
+done
 mv "$STAGE/{name}.runfiles" "$STAGE/release_venv_warmed"
 for f in {extra}; do
   cp "$f" "$STAGE/"
