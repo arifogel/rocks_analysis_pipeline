@@ -65,7 +65,7 @@ py_binary(
 py_binary(
     name = "local_ssa_katydid",
     srcs = [":local_ssa_katydid.py"],
-    data = ["@katydid//Source/Executables/Main:Katydid"],
+    data = ["@katydid_release//:katydid"],
     main = ":local_ssa_katydid.py",
     deps = [
         ":rocks_utility_lib",
@@ -164,7 +164,7 @@ py_binary(
     name = "stage1_task",
     srcs = [":stage1_task.py"],
     # + ["@ghcss//cmd/specsims"]
-    data = ["@katydid//Source/Executables/Main:Katydid"],
+    data = ["@katydid_release//:katydid"],
     main = ":stage1_task.py",
     deps = [
         ":noise_paths_lib",
@@ -205,7 +205,7 @@ py_binary(
     # subprocess, so nothing bundles these in transitively the way a data
     # dependency on that py_binary used to.
     # + ["@ghcss//cmd/specsims"]
-    data = ["@katydid//Source/Executables/Main:Katydid"],
+    data = ["@katydid_release//:katydid"],
     main = ":local_ssa.py",
     deps = [
         ":logging_setup_lib",
@@ -216,9 +216,12 @@ py_binary(
     ],
 )
 
-# Experiment: does py_image_layer materialize a real, relocatable copy of local_ssa's runfiles
-# (venv + @katydid//Source/Executables/Main:Katydid) suitable for a release tarball, or does it
-# still reference the build tree the way py_binary's own :local_ssa.venv symlink does?
+# Materializes local_ssa's own runfiles (venv + @katydid_release//:katydid) into a real,
+# relocatable release layer - unlike py_binary's own :local_ssa.venv symlink, which only points
+# back into the build tree. @katydid_release//:katydid is a plain sh_binary + data (see
+# @katydid//tools:katydid_release_repo.bzl), not a linked cc_binary, so nothing here needs to
+# survive Bazel's solib-farm symlink dereferencing the way @katydid//Source/Executables/Main:
+# Katydid's ROOT runtime dependency would.
 py_image_layer(
     name = "local_ssa_layer",
     binary = ":local_ssa",

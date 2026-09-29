@@ -28,9 +28,15 @@ git_override(
 bazel_dep(name = "katydid", version = "0.1.0")
 git_override(
     module_name = "katydid",
-    commit = "a5ea0eb4bb89ddc364956b479aaf4f1290d3abb7",  # main, as of 2026-09-28: "Add CLAUDE.md style guide; apply repo-wide, tighten visibility, dedupe shared constants (#34)"
+    # claude-release-repo, as of 2026-09-28: "Add @katydid_release module extension: exposes
+    # //:katydid_release as a real repo" - not yet merged to main. Move back to a main commit
+    # once https://github.com/arifogel/katydid/pull/new/claude-release-repo lands.
+    commit = "0e9620273bbfd509dc1a02f384a7f187814524d7",
     remote = "https://github.com/arifogel/katydid.git",
 )
+
+katydid_release = use_extension("@katydid//tools:katydid_release_repo.bzl", "katydid_release")
+use_repo(katydid_release, "katydid_release")
 
 # ghcss is a private repo; commented out so a plain `bazel build`/`bazel test` never needs to
 # fetch it (Bzlmod resolves every bazel_dep unconditionally, regardless of select()/target
