@@ -13,7 +13,7 @@ python.toolchain(
     python_version = PYTHON_VERSION,
 )
 
-# Only needed for the //:with_ghcss flag in BUILD.bazel, commented out alongside it.
+# Only needed for the ghcss-gating build flag, itself commented out alongside it.
 # bazel_dep(name = "bazel_skylib", version = "1.9.2")
 bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "aspect_rules_py", version = "1.12.1")

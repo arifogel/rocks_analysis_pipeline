@@ -9,9 +9,9 @@ sh_binary(
     visibility = ["//visibility:private"],
 )
 
-# Was meant to gate every ghcss data dependency below //rocks_analysis_pipeline off by default,
-# but Bzlmod resolves ghcss's bazel_dep unconditionally regardless of this select() - see
-# MODULE.bazel's comment. Commented out alongside every other ghcss reference.
+# Bzlmod resolves every bazel_dep unconditionally, regardless of this select() - see
+# MODULE.bazel's comment - so this flag can't gate the ghcss data dependencies below
+# //rocks_analysis_pipeline. Commented out alongside every other ghcss reference.
 # bool_flag(
 #     name = "with_ghcss",
 #     build_setting_default = False,

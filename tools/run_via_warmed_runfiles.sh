@@ -4,15 +4,11 @@
 # venv-creation filesystem write, which this assumes has already happened
 # (see this repo's own wulf orchestration design: multiple concurrent job
 # submitters must never trigger a rebuild while other jobs are running).
-# Verified directly against a real, working bazel-generated launcher for
-# one target (local_ssa) before being generalized to take the target name
-# as a parameter -- not yet re-verified for any other target.
 #
-# venv_target_name and script_target_name are independent: a released,
-# pre-warmed venv is shared across multiple entry points (see
-# //rocks_analysis_pipeline:release_venv and its own *_entry_lib deps), so
-# the venv that gets activated need not be the same target as the script
-# being run against it.
+# venv_target_name and script_target_name are independent: a single
+# pre-warmed venv can be shared across multiple entry points, so the venv
+# that gets activated need not be the same target as the script being run
+# against it.
 #
 # Usage: run_via_warmed_runfiles.sh <venv_target_name> <script_target_name> [args...]
 #   venv_target_name: the py_binary target whose own runfiles/venv this

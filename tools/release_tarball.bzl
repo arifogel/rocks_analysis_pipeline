@@ -1,22 +1,20 @@
-"""release_tarball(): assembles this repo's own release tarball in a single action, so the
-warmed venv is only ever materialized once - not once as an intermediate warmed-venv artifact and
-again inside a separate final-assembly step.
+"""release_tarball(): assembles this repo's own release tarball in a single action, materializing
+the warmed venv only once.
 
-Makes a portable copy of binary's own runfiles (dereferencing, `cp -aL`, before running: Bazel's
-own runfiles symlinks point into the action's sandbox or external-repo cache, never valid once
-relocated - the same fix that makes @katydid//release:katydid portable), runs the copied launcher
-against that copy to force its lazily-created venv into existence there, lays extra_files (release
-wrapper scripts, run_via_warmed_runfiles.sh) alongside under release_venv_warmed/'s own parent
-directory, and tars the whole thing as this target's one output.
+Makes a portable copy of binary's own runfiles before running it (`cp -aL`): Bazel's own runfiles
+symlinks point into the action's sandbox or external-repo cache, never valid once relocated. Runs
+the copied launcher against that copy to force its lazily-created venv into existence there, lays
+extra_files (release wrapper scripts, run_via_warmed_runfiles.sh) alongside under
+release_venv_warmed/'s own parent directory, and tars the whole thing as this target's one output.
 
 Venv creation itself (uv, under the hood) adds its own symlinks - the interpreter, per-file entries
 for individually-linked packages - as absolute paths into the action's own $(mktemp -d) staging
-directory, not relative ones: confirmed directly, not assumed, via a real extracted release
-(pyvenv.cfg's own `home` line and bin/python pointed at a dead /tmp/tmp.* path). Every symlink
-whose target lies inside that staging directory is rewritten to a relative one before tarring, so
-it still resolves correctly wherever the tarball ends up extracted; a symlink pointing outside the
-staging directory entirely would be a real, separate problem (none were found empirically for this
-binary) and is left untouched here rather than silently masked.
+directory, not relative ones: pyvenv.cfg's own `home` line and bin/python end up pointing at that
+now-gone staging directory once extracted elsewhere. Every symlink whose target lies inside that
+staging directory is rewritten to a relative one before tarring, so it still resolves correctly
+wherever the tarball ends up extracted; a symlink pointing outside the staging directory entirely
+would be a real, separate problem (none found for this binary) and is left untouched here rather
+than silently masked.
 """
 
 def _release_tarball_impl(ctx):
