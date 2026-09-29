@@ -6,8 +6,8 @@ local subprocesses.
 
 Map: every (subrun, field) simulation+analysis task for a run, run in
 parallel on wulf's own compute nodes. Reduce: one job, dependent on every
-map task succeeding, merging their outputs into this run's own combined
-result.
+map task finishing (not necessarily succeeding -- see --allow-missing),
+merging their outputs into this run's combined result.
 
 Input: a run name, a base specsims yaml/json config, a katydid config,
 and a noise reference (--noise-id or --noise-paths) -- see --help for the
@@ -19,19 +19,19 @@ local_ssa.py itself produces (see stage2_merge.py's own module doc
 comment for the real logic; verified directly against both before
 writing this).
 
-Side effects: two sbatch invocations.
-First job: a Slurm job array, one task per (subrun, field) pair, each an
-independently scheduled and run Slurm task sharing one array job id.
-Each task writes its own log under runs_dir/run_name/subrun_*/field_*/,
-matching where a locally-run task would.
-Second job: a single, non-array job, submitted with
---dependency=afterany:<the first job's own array id> -- Slurm starts it
-once every task in that array has finished, whether or not each one
-succeeded (afterok would instead block this job forever the moment any
-single array task fails, defeating stage2_merge_task's own --allow-missing).
-Both jobs' own sbatch stdout/stderr capture (a fallback for whatever each
-doesn't already log itself, e.g. a crash before its own logging starts)
-goes under runs_dir/run_name/slurm_logs/.
+Side effects: one or more map sbatch invocations, plus one reduce sbatch invocation.
+Map: every (subrun, field) pair, one Slurm task each, submitted as one or more Slurm job
+arrays -- chunked at --max-array-size tasks per array, since a single array job can only
+hold as many tasks as the cluster's MaxArraySize allows (see --max-array-size's help for
+how to find that limit). Each task writes its own log under
+runs_dir/run_name/subrun_*/field_*/, matching where a locally-run task would.
+Reduce: a single, non-array job, submitted with --dependency=afterany:<every map chunk's
+array id, colon-separated> -- Slurm starts it once every task in every chunk has
+finished, whether or not each one succeeded (afterok would instead block this job forever
+the moment any single array task fails, defeating stage2_merge_task's --allow-missing).
+Every job's own sbatch stdout/stderr capture (a fallback for whatever each doesn't already
+log itself, e.g. a crash before its own logging starts) goes under
+runs_dir/run_name/slurm_logs/.
 
 Execution environment: run this script on cenpa-wulf's own head node; it
 does no simulation, analysis, or merge work itself, only submits jobs
@@ -106,9 +106,20 @@ def parse_args() -> argparse.Namespace:
     )
     arg("--merge-tlim", type=str, default="12:00:00", help="sbatch --time (HH:MM:SS) for the merge job")
 
+    arg(
+        "--max-array-size",
+        type=int,
+        default=1000,
+        help="max tasks per submitted Slurm job array; the full (subrun, field) task list is split "
+        "into this many tasks per chunk, one map sbatch call per chunk, since a single array job "
+        "can't exceed the cluster's MaxArraySize (`scontrol show config | grep MaxArraySize`). "
+        "Default is comfortably under Slurm's stock 1001 default -- lower this if this cluster's "
+        "MaxArraySize is smaller",
+    )
+
     arg("--allow-missing", action="store_true", help="pass --allow-missing through to the merge job")
 
-    arg("--dry-run", action="store_true", help="print the two commands that would be submitted, without calling sbatch")
+    arg("--dry-run", action="store_true", help="print the map/reduce commands that would be submitted, without calling sbatch")
 
     arg("--log-level", type=str, default="INFO", help="root log level -- see logging_setup.init_logging")
     arg(
@@ -167,8 +178,33 @@ def build_jobs_and_num_fields(args: argparse.Namespace) -> tuple[list[dict[str, 
     return jobs, num_fields
 
 
-def build_map_command(launcher_path: str, runfiles_dir: str, args: argparse.Namespace, num_fields: int) -> str:
-    """Builds the shell command each map task runs."""
+def build_job_chunks(num_jobs: int, max_array_size: int) -> list[tuple[int, int]]:
+    """Splits the full, global 0..num_jobs-1 task-id range into consecutive chunks of at most
+    max_array_size each, one per Slurm job array -- see --max-array-size's help for why a
+    single array can't just hold all of num_jobs.
+
+    Returns a list of (offset, chunk_size) pairs, in order: chunk i covers global task ids
+    offset..offset+chunk_size-1, submitted as that chunk's array job with local indices
+    0..chunk_size-1. offset is each chunk's global starting position, to be reapplied wherever
+    a chunk's local $SLURM_ARRAY_TASK_ID needs mapping back to its real, global task id.
+    """
+    chunks: list[tuple[int, int]] = []
+    offset = 0
+    while offset < num_jobs:
+        chunk_size = min(max_array_size, num_jobs - offset)
+        chunks.append((offset, chunk_size))
+        offset += chunk_size
+    return chunks
+
+
+def build_map_command(
+    launcher_path: str, runfiles_dir: str, args: argparse.Namespace, num_fields: int, job_id_offset: int
+) -> str:
+    """Builds the shell command each map task runs.
+
+    job_id_offset shifts $SLURM_ARRAY_TASK_ID -- which restarts at 0 in every chunk's array
+    job -- back to that task's real, global position in the full (subrun, field) task list.
+    """
     parts = [
         f"RUNFILES_DIR={shlex.quote(runfiles_dir)}",
         shlex.quote(launcher_path),
@@ -176,9 +212,11 @@ def build_map_command(launcher_path: str, runfiles_dir: str, args: argparse.Name
         "stage1_task",
         shlex.quote(f"--runs-dir={args.runs_dir}"),
         shlex.quote(f"--run-name={args.run_name}"),
-        # Deliberately unquoted, so the shell on the compute node expands it
-        # at runtime -- shlex.quote would suppress that expansion entirely.
-        "--job-id=$SLURM_ARRAY_TASK_ID",
+        # Deliberately unquoted, so the shell on the compute node expands it at runtime --
+        # shlex.quote would suppress that expansion entirely. The arithmetic expansion adds
+        # job_id_offset even when it's 0, rather than special-casing the first chunk, so every
+        # chunk's command is built the same way.
+        f"--job-id=$(($SLURM_ARRAY_TASK_ID + {job_id_offset}))",
         shlex.quote(f"--num-fields={num_fields}"),
         shlex.quote(f"--yaml-config={args.yaml_config}"),
         shlex.quote(f"--json-config={args.json_config}"),
@@ -232,9 +270,17 @@ def build_reduce_command(launcher_path: str, runfiles_dir: str, args: argparse.N
     return " ".join(parts)
 
 
-def submit_map(launcher_path: str, runfiles_dir: str, args: argparse.Namespace, num_jobs: int, num_fields: int) -> str:
-    """Submits every map task as one Slurm job array, returning its own
-    primary job id (sbatch_job's own --parsable).
+def submit_map_chunk(
+    launcher_path: str,
+    runfiles_dir: str,
+    args: argparse.Namespace,
+    num_fields: int,
+    chunk_index: int,
+    offset: int,
+    chunk_size: int,
+) -> str:
+    """Submits one chunk's map tasks as one Slurm job array, returning its primary job id
+    (sbatch_job's --parsable).
     """
     slurm_log_dir = Path(args.runs_dir) / args.run_name / "slurm_logs"
     slurm_log_dir.mkdir(parents=True, exist_ok=True)
@@ -244,21 +290,21 @@ def submit_map(launcher_path: str, runfiles_dir: str, args: argparse.Namespace, 
     # crash before its own init_logging even runs) -- stage1_task.py's own,
     # more detailed per-task log still lands at task_dir/stage1_task.log as
     # usual.
-    log_path = slurm_log_dir / "map_%A_%a.log"
+    log_path = slurm_log_dir / f"map_chunk{chunk_index}_%A_%a.log"
 
-    cmd = build_map_command(launcher_path, runfiles_dir, args, num_fields)
+    cmd = build_map_command(launcher_path, runfiles_dir, args, num_fields, job_id_offset=offset)
     proc = sbatch_job(
         cmd=cmd,
-        job_name=f"{args.run_name}_map",
+        job_name=f"{args.run_name}_map_chunk{chunk_index}",
         tlim=args.tlim,
         log_path=log_path,
-        array=num_jobs,
+        array=chunk_size,
     )
     return proc.stdout.strip()
 
 
-def submit_reduce(launcher_path: str, runfiles_dir: str, args: argparse.Namespace, map_job_id: str) -> str:
-    """Submits the reduce job, with --dependency=afterany:<map_job_id>."""
+def submit_reduce(launcher_path: str, runfiles_dir: str, args: argparse.Namespace, map_job_ids: list[str]) -> str:
+    """Submits the reduce job, with --dependency=afterany:<map_job_ids, colon-separated>."""
     slurm_log_dir = Path(args.runs_dir) / args.run_name / "slurm_logs"
     slurm_log_dir.mkdir(parents=True, exist_ok=True)
     log_path = slurm_log_dir / "reduce_%j.log"
@@ -269,7 +315,7 @@ def submit_reduce(launcher_path: str, runfiles_dir: str, args: argparse.Namespac
         job_name=f"{args.run_name}_reduce",
         tlim=args.merge_tlim,
         log_path=log_path,
-        dependency=f"afterany:{map_job_id}",
+        dependency="afterany:" + ":".join(map_job_ids),
     )
     return proc.stdout.strip()
 
@@ -284,16 +330,31 @@ def main() -> None:
     launcher_path = resolve_launcher_path()
     runfiles_dir = resolve_runfiles_dir(launcher_path)
 
+    chunks = build_job_chunks(len(jobs), args.max_array_size)
+    logger.info(
+        "Split into %d chunk(s) of up to %d task(s) each (--max-array-size)", len(chunks), args.max_array_size
+    )
+
     if args.dry_run:
-        logger.info("[dry_run] map command:\n%s", build_map_command(launcher_path, runfiles_dir, args, num_fields))
+        for chunk_index, (offset, chunk_size) in enumerate(chunks):
+            logger.info(
+                "[dry_run] chunk %d map command (%d tasks, offset %d):\n%s",
+                chunk_index,
+                chunk_size,
+                offset,
+                build_map_command(launcher_path, runfiles_dir, args, num_fields, job_id_offset=offset),
+            )
         logger.info("[dry_run] reduce command:\n%s", build_reduce_command(launcher_path, runfiles_dir, args))
         return
 
-    map_job_id = submit_map(launcher_path, runfiles_dir, args, len(jobs), num_fields)
-    logger.info("submitted the simulation+analysis job array %s (%d tasks)", map_job_id, len(jobs))
+    map_job_ids = []
+    for chunk_index, (offset, chunk_size) in enumerate(chunks):
+        map_job_id = submit_map_chunk(launcher_path, runfiles_dir, args, num_fields, chunk_index, offset, chunk_size)
+        logger.info("submitted map chunk %d: job %s (%d tasks)", chunk_index, map_job_id, chunk_size)
+        map_job_ids.append(map_job_id)
 
-    reduce_job_id = submit_reduce(launcher_path, runfiles_dir, args, map_job_id)
-    logger.info("submitted the merge job %s (runs after %s completes)", reduce_job_id, map_job_id)
+    reduce_job_id = submit_reduce(launcher_path, runfiles_dir, args, map_job_ids)
+    logger.info("submitted the merge job %s (runs after %s completes)", reduce_job_id, ", ".join(map_job_ids))
 
 
 if __name__ == "__main__":
