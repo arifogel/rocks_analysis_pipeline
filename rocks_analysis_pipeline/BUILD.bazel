@@ -1,7 +1,7 @@
 load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_library", "py_test")
 load("@pypi//:requirements.bzl", "requirement")
 load("//tools:deps.bzl", "cdeps", "python_ide_backport")
-load("//tools:warm_py_binary.bzl", "warm_py_binary")
+load("//tools:release_tarball.bzl", "release_tarball")
 
 py_binary(
     name = "sbatch_spec_sims",
@@ -250,17 +250,9 @@ py_binary(
     ],
 )
 
-# The actual pre-warmed, relocatable venv + runfiles for the release build - see
-# //tools:warm_py_binary.bzl. Supersedes py_image_layer for this purpose: py_image_layer only
-# packages release_venv's own lazy first-run launcher, never a materialized venv.
-warm_py_binary(
-    name = "release_venv_warmed",
-    binary = ":release_venv",
-)
-
 # Tiny per-entry-point wrapper scripts around //tools:run_via_warmed_runfiles.sh, meant to sit
-# alongside :release_venv_warmed and run_via_warmed_runfiles.sh itself in the assembled release
-# tarball: each just activates :release_venv_warmed's shared venv and execs its own script.
+# alongside release_venv_warmed/ and run_via_warmed_runfiles.sh itself in the assembled release
+# tarball: each just activates release_venv_warmed/'s shared venv and execs its own script.
 genrule(
     name = "local_ssa_release_wrapper",
     outs = ["local_ssa.sh"],
@@ -287,28 +279,17 @@ chmod +x $@
 """,
 )
 
-# The single release deliverable: :release_venv_warmed extracted under release_venv_warmed/,
-# alongside the wrapper scripts and run_via_warmed_runfiles.sh, re-tarred as one flat archive -
-# same shape as @katydid//:katydid_release, so it extracts and runs on a bare AlmaLinux host with
-# no Bazel present.
-genrule(
-    name = "release_tarball",
-    srcs = [
+# The single release deliverable, and the only large output in this package - see
+# //tools:release_tarball.bzl. Same flat shape as @katydid//:katydid_release, so it extracts and
+# runs on a bare AlmaLinux host with no Bazel present.
+release_tarball(
+    name = "release",
+    binary = ":release_venv",
+    extra_files = [
         ":local_ssa_release_wrapper",
-        ":release_venv_warmed",
         ":wulf_ssa_release_wrapper",
         "//tools:run_via_warmed_runfiles.sh",
     ],
-    outs = ["release.tar.gz"],
-    cmd = """
-set -euo pipefail
-STAGE="$$(mktemp -d)"
-mkdir -p "$$STAGE/release_venv_warmed"
-tar xf $(location :release_venv_warmed) -C "$$STAGE/release_venv_warmed"
-cp $(location :local_ssa_release_wrapper) $(location :wulf_ssa_release_wrapper) $(location //tools:run_via_warmed_runfiles.sh) "$$STAGE/"
-tar czf $@ -C "$$STAGE" .
-rm -rf "$$STAGE"
-""",
 )
 
 python_ide_backport()
