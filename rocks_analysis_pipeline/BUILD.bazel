@@ -286,9 +286,6 @@ py_library(
     deps = [
         ":logging_setup_lib",
         ":rocks_utility_lib",
-        # wulf_ssa invokes stage2_merge_task in-venv via run_via_warmed_runfiles.sh, so
-        # stage2_merge_task.py needs to be part of release_venv's runfiles tree too -- nothing
-        # else release_venv depends on pulls it in.
         ":stage2_merge_task_lib",
         "@rules_python//python/runfiles",
     ],
