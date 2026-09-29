@@ -1,4 +1,4 @@
-load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_library")
+load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_library", "py_test")
 load("@pypi//:requirements.bzl", "requirement")
 load("//tools:deps.bzl", "cdeps", "python_ide_backport")
 load("//tools:release_tarball.bzl", "release_tarball")
@@ -182,6 +182,23 @@ py_library(
 #         "@rules_python//python/runfiles",
 #     ],
 # )
+
+py_test(
+    name = "stage1_steps_katydid_resolution_test",
+    srcs = [":stage1_steps_katydid_resolution_test.py"],
+    data = ["@katydid//release:katydid"],
+    main = ":stage1_steps_katydid_resolution_test.py",
+    deps = [":stage1_steps_lib"],
+)
+
+py_test(
+    name = "render_katydid_config_test",
+    srcs = [":render_katydid_config_test.py"],
+    main = ":render_katydid_config_test.py",
+    deps = cdeps([
+        requirement("pyyaml"),
+    ]) + [":stage1_steps_lib"],
+)
 
 py_library(
     name = "stage1_task_lib",
