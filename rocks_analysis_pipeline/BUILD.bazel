@@ -1,4 +1,4 @@
-load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_library", "py_test")
+load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_library")
 load("@pypi//:requirements.bzl", "requirement")
 load("//tools:deps.bzl", "cdeps", "python_ide_backport")
 load("//tools:release_tarball.bzl", "release_tarball")
