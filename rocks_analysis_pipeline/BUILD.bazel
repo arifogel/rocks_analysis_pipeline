@@ -289,14 +289,14 @@ py_binary(
 
 release_wrapper(
     name = "local_ssa_release_wrapper",
-    venv_target_name = "release_venv",
     script_target_name = "local_ssa",
+    venv_target_name = "release_venv",
 )
 
 release_wrapper(
     name = "wulf_ssa_release_wrapper",
-    venv_target_name = "release_venv",
     script_target_name = "wulf_ssa",
+    venv_target_name = "release_venv",
 )
 
 # The single release deliverable - see //tools:release_tarball.bzl. Extracts and runs on a bare
