@@ -2,11 +2,12 @@ load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_library")
 load("@pypi//:requirements.bzl", "requirement")
 load("//tools:deps.bzl", "cdeps", "python_ide_backport")
 load("//tools:release_tarball.bzl", "release_tarball")
+load("//tools:release_wrapper.bzl", "release_wrapper")
 
 # Explicit __init__.py for this package and its api/ subpackage. rules_python's implicit
 # creation is deprecated (https://github.com/bazel-contrib/rules_python/issues/2945) and
 # disabled repo-wide via rules_python_config.explicit_init_py in MODULE.bazel, so every target
-# below depends on this directly or transitively instead of relying on it.
+# below depends on package_init_lib directly or transitively for its __init__.py.
 py_library(
     name = "package_init_lib",
     srcs = [
@@ -69,8 +70,10 @@ py_binary(
         ":local_spec_sims.py",
         ":run_spec_sims_ghcss.py",
     ],
-    # ghcss is commented out repo-wide (see MODULE.bazel); restore this once it's available again.
-    # data = ["@ghcss//cmd/specsims"],
+    data = [
+        # ghcss is commented out repo-wide (see MODULE.bazel); uncomment once it's available again.
+        # "@ghcss//cmd/specsims",
+    ],
     main = ":local_spec_sims.py",
     deps = cdeps([
         requirement("numpy"),
@@ -174,9 +177,11 @@ py_library(
 py_library(
     name = "stage1_task_lib",
     srcs = ["stage1_task.py"],
-    # ghcss is commented out repo-wide (see MODULE.bazel); restore "@ghcss//cmd/specsims"
-    # alongside this once it's available again.
-    data = ["@katydid//release:katydid"],
+    data = [
+        # ghcss is commented out repo-wide (see MODULE.bazel); uncomment once it's available again.
+        # "@ghcss//cmd/specsims",
+        "@katydid//release:katydid",
+    ],
     deps = [
         ":noise_paths_lib",
         ":stage1_state_lib",
@@ -217,14 +222,15 @@ py_binary(
 py_library(
     name = "local_ssa_entry_lib",
     srcs = ["local_ssa.py"],
-    # stage1_task's own go-binary data deps (specsims/Katydid), needed directly here: local_ssa
-    # invokes stage1_task in-venv via `sys.executable -m stage1_task` (see local_ssa.py's own
-    # docstring for the full reasoning), so they're not picked up transitively from a data
-    # dependency on a separate py_binary.
-    #
-    # ghcss is commented out repo-wide (see MODULE.bazel); restore "@ghcss//cmd/specsims"
-    # alongside this once it's available again.
-    data = ["@katydid//release:katydid"],
+    # stage1_task's data deps (specsims/Katydid), needed directly here: local_ssa invokes
+    # stage1_task in-venv via `sys.executable -m stage1_task` (see local_ssa.py's docstring for
+    # the full reasoning), so they're not picked up transitively from a data dependency on a
+    # separate py_binary.
+    data = [
+        # ghcss is commented out repo-wide (see MODULE.bazel); uncomment once it's available again.
+        # "@ghcss//cmd/specsims",
+        "@katydid//release:katydid",
+    ],
     deps = [
         ":logging_setup_lib",
         ":stage1_state_lib",
@@ -259,7 +265,7 @@ py_binary(
     deps = [":wulf_ssa_entry_lib"],
 )
 
-# The venv-sharing target for the release build: warming this one target's own venv gives every
+# The venv-sharing target for the release build: warming this one target's venv gives every
 # entry point above a single, already-built venv to run against instead of each carrying its own
 # mostly-duplicate one. release_venv.py itself is a no-op; only its venv matters.
 py_binary(
@@ -272,37 +278,20 @@ py_binary(
     ],
 )
 
-# Tiny per-entry-point wrapper scripts around //tools:run_via_warmed_runfiles.sh, meant to sit
-# alongside release_venv_warmed/ and run_via_warmed_runfiles.sh itself in the assembled release
-# tarball: each just activates release_venv_warmed/'s shared venv and execs its own script.
-genrule(
+release_wrapper(
     name = "local_ssa_release_wrapper",
-    outs = ["local_ssa.sh"],
-    cmd = """cat > $@ << 'WRAPPER_EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-DIR="$$(cd "$$(dirname "$${BASH_SOURCE[0]}")" && pwd)"
-RUNFILES_DIR="$$DIR/release_venv_warmed" exec "$$DIR/run_via_warmed_runfiles.sh" release_venv local_ssa "$$@"
-WRAPPER_EOF
-chmod +x $@
-""",
+    venv_target_name = "release_venv",
+    script_target_name = "local_ssa",
 )
 
-genrule(
+release_wrapper(
     name = "wulf_ssa_release_wrapper",
-    outs = ["wulf_ssa.sh"],
-    cmd = """cat > $@ << 'WRAPPER_EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-DIR="$$(cd "$$(dirname "$${BASH_SOURCE[0]}")" && pwd)"
-RUNFILES_DIR="$$DIR/release_venv_warmed" exec "$$DIR/run_via_warmed_runfiles.sh" release_venv wulf_ssa "$$@"
-WRAPPER_EOF
-chmod +x $@
-""",
+    venv_target_name = "release_venv",
+    script_target_name = "wulf_ssa",
 )
 
-# The single release deliverable, and the only large output in this package - see
-# //tools:release_tarball.bzl. Extracts and runs on a bare AlmaLinux host with no Bazel present.
+# The single release deliverable - see //tools:release_tarball.bzl. Extracts and runs on a bare
+# AlmaLinux host with no Bazel present.
 release_tarball(
     name = "release",
     binary = ":release_venv",

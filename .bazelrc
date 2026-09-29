@@ -1,9 +1,9 @@
 # Force Bazel to ignore host python and use the toolchain
 build --incompatible_use_python_toolchains=true
 #build --@pypi//venv=dev
-# rules_python_config.explicit_init_py in MODULE.bazel only sets our own module's default; this
-# flag is the only thing that also reaches third-party targets like rules_pkg's own
-# pkg/private/tar:build_tar (already fixed upstream to work explicitly - bazelbuild/rules_pkg#1082).
+# rules_python_config.explicit_init_py in MODULE.bazel only sets our module's default; this flag
+# is the only thing that also reaches third-party targets like rules_pkg's pkg/private/tar:build_tar
+# (already fixed upstream to work explicitly - bazelbuild/rules_pkg#1082).
 build --incompatible_default_to_explicit_init_py
 # Fail builds/tests if MODULE.bazel and MODULE.bazel.lock are out of sync
 common --lockfile_mode=error

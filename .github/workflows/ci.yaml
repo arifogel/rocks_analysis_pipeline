@@ -128,7 +128,7 @@ jobs:
 
       # AlmaLinux is a RHEL-family Linux distribution, using dnf rather than apt. gcc-c++ (a C++
       # compiler) and git (which Bazel uses to fetch this repo's bundled dependencies) are
-      # Bazel's own requirements, missing from this minimal container image by default. cpio
+      # Bazel's requirements, missing from this minimal container image by default. cpio
       # unpacks the .rpm packages katydid's tools/almalinux_libs.bzl fetches; rpm2cpio ships with
       # the base image as part of the `rpm` package. Bazel fetches Boost/FFTW/MatIO/TBB/xxhash/
       # FreeType/GSL hermetically from AlmaLinux's and EPEL's pinned package archives (see

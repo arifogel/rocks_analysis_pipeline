@@ -1,15 +1,15 @@
-"""release_tarball(): assembles this repo's own release tarball in a single action, materializing
+"""release_tarball(): assembles this repo's release tarball in a single action, materializing
 the warmed venv only once.
 
-Makes a portable copy of binary's own runfiles before running it (`cp -aL`): Bazel's own runfiles
-symlinks point into the action's sandbox or external-repo cache, never valid once relocated. Runs
-the copied launcher against that copy to force its lazily-created venv into existence there, lays
+Makes a portable copy of binary's runfiles before running it: Bazel's runfiles symlinks
+point into the action's sandbox or external-repo cache, never valid once relocated. Runs the
+copied launcher against that copy to force its lazily-created venv into existence there, lays
 extra_files (release wrapper scripts, run_via_warmed_runfiles.sh) alongside under
-release_venv_warmed/'s own parent directory, and tars the whole thing as this target's one output.
+release_venv_warmed/'s parent directory, and tars the whole thing as this target's one output.
 
-Venv creation itself (uv, under the hood) adds its own symlinks - the interpreter, per-file entries
-for individually-linked packages - as absolute paths into the action's own $(mktemp -d) staging
-directory, not relative ones: pyvenv.cfg's own `home` line and bin/python end up pointing at that
+Venv creation (uv, under the hood) adds its own symlinks for the interpreter and for per-file
+entries of individually-linked packages. These are absolute paths into the action's staging
+directory, not relative ones. pyvenv.cfg's `home` line and bin/python end up pointing at that
 now-gone staging directory once extracted elsewhere. Every symlink whose target lies inside that
 staging directory is rewritten to a relative one before tarring, so it still resolves correctly
 wherever the tarball ends up extracted; a symlink pointing outside the staging directory entirely

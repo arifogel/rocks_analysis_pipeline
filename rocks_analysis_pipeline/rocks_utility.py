@@ -188,8 +188,6 @@ def sbatch_job(
         input = script,
         check=True,
         text=True,
-        # --parsable's whole point is a stdout callers parse programmatically (the new job's own
-        # id) -- always captured, regardless of --hold.
         capture_output=True,
     )
     return proc

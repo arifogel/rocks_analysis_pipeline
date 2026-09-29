@@ -344,15 +344,18 @@ def build_katydid_command(row: pd.Series, katydid_path: str, noise_paths: list[s
 
 
 def resolve_katydid_path() -> str:
+    """Resolves Katydid's real path via runfiles, and confirms it's an executable file."""
     r = runfiles.Create()
     katydid_path = r.Rlocation(KATYDID_RLOCATION)
-    if katydid_path is None or not Path(katydid_path).is_file() or not os.access(katydid_path, os.X_OK):
+    if katydid_path is None:
         raise RuntimeError(
-            f"Could not resolve an executable katydid binary via runfiles "
-            f"at '{KATYDID_RLOCATION}' (got: {katydid_path}). If the "
-            f"canonical repo name for the katydid module has changed, "
-            f"update KATYDID_RLOCATION at the top of this file."
+            f"Runfiles has no mapping for '{KATYDID_RLOCATION}'. If the canonical repo name for "
+            f"the katydid module has changed, update KATYDID_RLOCATION at the top of this file."
         )
+    if not Path(katydid_path).is_file():
+        raise RuntimeError(f"Resolved katydid path '{katydid_path}' does not exist.")
+    if not os.access(katydid_path, os.X_OK):
+        raise RuntimeError(f"Resolved katydid path '{katydid_path}' is not executable.")
     return katydid_path
 
 

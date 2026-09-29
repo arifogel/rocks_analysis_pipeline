@@ -136,12 +136,12 @@ def resolve_launcher_path() -> str:
 
 
 def resolve_runfiles_dir(launcher_path: str) -> str:
-    """release_venv_warmed/'s own path, three parents up from launcher_path's
-    own _main/tools/run_via_warmed_runfiles.sh. Passed to
-    run_via_warmed_runfiles.sh explicitly in every submitted job: wulf runs
-    this against an extracted release tarball from the head node, not a
-    bazel checkout, so run_via_warmed_runfiles.sh's own bazel-bin-relative
-    fallback has nothing to find there.
+    """release_venv_warmed/'s path, computed from launcher_path (run_via_warmed_runfiles.sh's
+    resolved path).
+
+    Passed to run_via_warmed_runfiles.sh explicitly in every submitted job: wulf runs this
+    against an extracted release tarball from the head node, not a bazel checkout, so
+    run_via_warmed_runfiles.sh's bazel-bin-relative fallback has nothing to find there.
     """
     return str(Path(launcher_path).parent.parent.parent)
 
