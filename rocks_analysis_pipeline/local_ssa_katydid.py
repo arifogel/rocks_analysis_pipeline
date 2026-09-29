@@ -58,7 +58,7 @@ import pandas as pd
 import yaml
 from python.runfiles import runfiles
 
-KATYDID_RLOCATION = "katydid++katydid_release+katydid_release/bin/Katydid"
+KATYDID_RLOCATION = "katydid+/release/katydid.sh"
 
 SPECK_FILENAME_RE = re.compile(r"(\d+)_(\d+)\.speck$")
 FIELD_DIR_RE = re.compile(r"(\d+)_field_")
