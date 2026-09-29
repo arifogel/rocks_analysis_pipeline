@@ -1,6 +1,21 @@
 load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_library", "py_test")
 load("@pypi//:requirements.bzl", "requirement")
 load("//tools:deps.bzl", "cdeps", "python_ide_backport")
+load("//tools:release_tarball.bzl", "release_tarball")
+load("//tools:release_wrapper.bzl", "release_wrapper")
+
+# Explicit __init__.py for this package and its api/ subpackage. rules_python's implicit
+# creation is deprecated (https://github.com/bazel-contrib/rules_python/issues/2945) and
+# disabled repo-wide via rules_python_config.explicit_init_py in MODULE.bazel, so every target
+# below depends on package_init_lib directly or transitively for its __init__.py.
+py_library(
+    name = "package_init_lib",
+    srcs = [
+        "__init__.py",
+        "api/__init__.py",
+    ],
+    visibility = ["//rocks_analysis_pipeline/api/v1:__pkg__"],
+)
 
 py_binary(
     name = "sbatch_spec_sims",
@@ -15,7 +30,7 @@ py_binary(
         requirement("pyyaml"),
         requirement("scikit-learn"),
         requirement("uproot"),
-    ]),
+    ]) + [":package_init_lib"],
 )
 
 py_library(
@@ -30,7 +45,10 @@ py_library(
         requirement("pyyaml"),
         requirement("scikit-learn"),
         requirement("uproot"),
-    ]) + ["@he6-cres-spec-sims//src/he6_cres_spec_sims"],
+    ]) + [
+        ":package_init_lib",
+        "@he6-cres-spec-sims//src/he6_cres_spec_sims",
+    ],
 )
 
 py_binary(
@@ -43,6 +61,16 @@ py_binary(
 py_library(
     name = "logging_setup_lib",
     srcs = ["logging_setup.py"],
+    deps = [":package_init_lib"],
+)
+
+py_library(
+    name = "runfiles_resolve_lib",
+    srcs = ["runfiles_resolve.py"],
+    deps = [
+        ":package_init_lib",
+        "@rules_python//python/runfiles",
+    ],
 )
 
 py_binary(
@@ -51,7 +79,10 @@ py_binary(
         ":local_spec_sims.py",
         ":run_spec_sims_ghcss.py",
     ],
-    data = ["@ghcss//cmd/specsims"],
+    data = [
+        # ghcss is commented out repo-wide (see MODULE.bazel); uncomment once it's available again.
+        # "@ghcss//cmd/specsims",
+    ],
     main = ":local_spec_sims.py",
     deps = cdeps([
         requirement("numpy"),
@@ -65,11 +96,11 @@ py_binary(
 py_binary(
     name = "local_ssa_katydid",
     srcs = [":local_ssa_katydid.py"],
-    data = ["@katydid//Source/Executables/Main:Katydid"],
+    data = ["@katydid//release:katydid"],
     main = ":local_ssa_katydid.py",
     deps = [
         ":rocks_utility_lib",
-        "@rules_python//python/runfiles",
+        ":runfiles_resolve_lib",
     ],
 )
 
@@ -89,6 +120,7 @@ py_binary(
 py_library(
     name = "checkpoints_lib",
     srcs = ["checkpoints.py"],
+    deps = [":package_init_lib"],
 )
 
 py_library(
@@ -125,6 +157,7 @@ py_library(
     ]) + [
         ":logging_setup_lib",
         ":noise_paths_lib",
+        ":runfiles_resolve_lib",
         ":stage1_state_lib",
         "//rocks_analysis_pipeline/api/v1:band_py_pb2",
         "//rocks_analysis_pipeline/api/v1:dmtrack_py_pb2",
@@ -132,25 +165,49 @@ py_library(
         "//rocks_analysis_pipeline/api/v1:point_py_pb2",
         "//rocks_analysis_pipeline/api/v1:slew_times_py_pb2",
         "//rocks_analysis_pipeline/api/v1:task_identity_py_pb2",
+        "//rocks_analysis_pipeline/api/v1:v1_init_lib",
         "@he6-cres-spec-sims//src/he6_cres_spec_sims",
-        "@rules_python//python/runfiles",
     ],
 )
 
+# Its entire job is asserting the specsims binary resolves via runfiles, no use while ghcss is
+# commented out repo-wide (see MODULE.bazel).
+# py_test(
+#     name = "stage1_steps_specsims_resolution_test",
+#     srcs = [":stage1_steps_specsims_resolution_test.py"],
+#     data = ["@ghcss//cmd/specsims"],
+#     main = ":stage1_steps_specsims_resolution_test.py",
+#     deps = [
+#         ":stage1_steps_lib",
+#         "@rules_python//python/runfiles",
+#     ],
+# )
+
 py_test(
-    name = "stage1_steps_specsims_resolution_test",
-    srcs = [":stage1_steps_specsims_resolution_test.py"],
-    data = ["@ghcss//cmd/specsims"],
-    main = ":stage1_steps_specsims_resolution_test.py",
-    deps = [
-        ":stage1_steps_lib",
-        "@rules_python//python/runfiles",
-    ],
+    name = "stage1_steps_katydid_resolution_test",
+    srcs = [":stage1_steps_katydid_resolution_test.py"],
+    data = ["@katydid//release:katydid"],
+    main = ":stage1_steps_katydid_resolution_test.py",
+    deps = [":stage1_steps_lib"],
+)
+
+py_test(
+    name = "render_katydid_config_test",
+    srcs = [":render_katydid_config_test.py"],
+    main = ":render_katydid_config_test.py",
+    deps = cdeps([
+        requirement("pyyaml"),
+    ]) + [":stage1_steps_lib"],
 )
 
 py_library(
     name = "stage1_task_lib",
     srcs = ["stage1_task.py"],
+    data = [
+        # ghcss is commented out repo-wide (see MODULE.bazel); uncomment once it's available again.
+        # "@ghcss//cmd/specsims",
+        "@katydid//release:katydid",
+    ],
     deps = [
         ":noise_paths_lib",
         ":stage1_state_lib",
@@ -161,16 +218,8 @@ py_library(
 py_binary(
     name = "stage1_task",
     srcs = [":stage1_task.py"],
-    data = [
-        "@ghcss//cmd/specsims",
-        "@katydid//Source/Executables/Main:Katydid",
-    ],
     main = ":stage1_task.py",
-    deps = [
-        ":noise_paths_lib",
-        ":stage1_state_lib",
-        ":stage1_steps_lib",
-    ],
+    deps = [":stage1_task_lib"],
 )
 
 py_library(
@@ -182,13 +231,13 @@ py_library(
         "//rocks_analysis_pipeline/api/v1:dmtrack_py_pb2",
         "//rocks_analysis_pipeline/api/v1:event_py_pb2",
         "//rocks_analysis_pipeline/api/v1:point_py_pb2",
+        "//rocks_analysis_pipeline/api/v1:v1_init_lib",
     ],
 )
 
-py_binary(
-    name = "stage2_merge_task",
-    srcs = [":stage2_merge_task.py"],
-    main = ":stage2_merge_task.py",
+py_library(
+    name = "stage2_merge_task_lib",
+    srcs = ["stage2_merge_task.py"],
     deps = [
         ":logging_setup_lib",
         ":stage2_merge_lib",
@@ -196,19 +245,24 @@ py_binary(
 )
 
 py_binary(
-    name = "local_ssa",
-    srcs = [":local_ssa.py"],
-    # stage1_task's own go-binary data deps (specsims/Katydid), needed
-    # directly here: local_ssa invokes stage1_task in-venv via
-    # `sys.executable -m stage1_task` (see local_ssa.py's own docstring
-    # for the full reasoning), not stage1_task's own py_binary as a
-    # subprocess, so nothing bundles these in transitively the way a data
-    # dependency on that py_binary used to.
+    name = "stage2_merge_task",
+    srcs = [":stage2_merge_task.py"],
+    main = ":stage2_merge_task.py",
+    deps = [":stage2_merge_task_lib"],
+)
+
+py_library(
+    name = "local_ssa_entry_lib",
+    srcs = ["local_ssa.py"],
+    # stage1_task's data deps (specsims/Katydid), needed directly here: local_ssa invokes
+    # stage1_task in-venv via `sys.executable -m stage1_task` (see local_ssa.py's docstring for
+    # the full reasoning), so they're not picked up transitively from a data dependency on a
+    # separate py_binary.
     data = [
-        "@ghcss//cmd/specsims",
-        "@katydid//Source/Executables/Main:Katydid",
+        # ghcss is commented out repo-wide (see MODULE.bazel); uncomment once it's available again.
+        # "@ghcss//cmd/specsims",
+        "@katydid//release:katydid",
     ],
-    main = ":local_ssa.py",
     deps = [
         ":logging_setup_lib",
         ":stage1_state_lib",
@@ -219,14 +273,65 @@ py_binary(
 )
 
 py_binary(
-    name = "wulf_ssa",
-    srcs = [":wulf_ssa.py"],
+    name = "local_ssa",
+    srcs = [":local_ssa.py"],
+    main = ":local_ssa.py",
+    deps = [":local_ssa_entry_lib"],
+)
+
+py_library(
+    name = "wulf_ssa_entry_lib",
+    srcs = ["wulf_ssa.py"],
     data = ["//tools:run_via_warmed_runfiles.sh"],
-    main = ":wulf_ssa.py",
     deps = [
         ":logging_setup_lib",
         ":rocks_utility_lib",
+        ":stage2_merge_task_lib",
         "@rules_python//python/runfiles",
+    ],
+)
+
+py_binary(
+    name = "wulf_ssa",
+    srcs = [":wulf_ssa.py"],
+    main = ":wulf_ssa.py",
+    deps = [":wulf_ssa_entry_lib"],
+)
+
+# The venv-sharing target for the release build: warming this one target's venv gives every
+# entry point above a single, already-built venv to run against instead of each carrying its own
+# mostly-duplicate one. release_venv.py itself is a no-op; only its venv matters.
+py_binary(
+    name = "release_venv",
+    srcs = ["release_venv.py"],
+    main = "release_venv.py",
+    deps = [
+        ":local_ssa_entry_lib",
+        ":wulf_ssa_entry_lib",
+    ],
+)
+
+release_wrapper(
+    name = "local_ssa_release_wrapper",
+    script_target_name = "local_ssa",
+    venv_target_name = "release_venv",
+)
+
+release_wrapper(
+    name = "wulf_ssa_release_wrapper",
+    script_target_name = "wulf_ssa",
+    venv_target_name = "release_venv",
+)
+
+# The single release deliverable - see //tools:release_tarball.bzl. Extracts and runs on a bare
+# AlmaLinux host with no Bazel present.
+release_tarball(
+    name = "release",
+    binary = ":release_venv",
+    extra_files = [
+        ":local_ssa_release_wrapper",
+        ":wulf_ssa_release_wrapper",
+        "//tools:run_via_warmed_runfiles.sh",
     ],
 )
 

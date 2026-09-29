@@ -56,9 +56,10 @@ import he6_cres_spec_sims.spec_tools.spec_calc.spec_calc as sc
 import numpy as np
 import pandas as pd
 import yaml
-from python.runfiles import runfiles
 
-KATYDID_RLOCATION = "katydid+/Source/Executables/Main/Katydid"
+from rocks_analysis_pipeline.runfiles_resolve import resolve_executable
+
+KATYDID_RLOCATION = "katydid+/release/katydid.sh"
 
 SPECK_FILENAME_RE = re.compile(r"(\d+)_(\d+)\.speck$")
 FIELD_DIR_RE = re.compile(r"(\d+)_field_")
@@ -343,16 +344,8 @@ def build_katydid_command(row: pd.Series, katydid_path: str, noise_paths: list[s
 
 
 def resolve_katydid_path() -> str:
-    r = runfiles.Create()
-    katydid_path = r.Rlocation(KATYDID_RLOCATION)
-    if katydid_path is None or not Path(katydid_path).is_file():
-        raise RuntimeError(
-            f"Could not resolve the katydid binary via runfiles at "
-            f"'{KATYDID_RLOCATION}' (got: {katydid_path}). If the "
-            f"canonical repo name for the katydid module has changed, "
-            f"update KATYDID_RLOCATION at the top of this file."
-        )
-    return katydid_path
+    """Resolves Katydid's real path via runfiles."""
+    return resolve_executable(KATYDID_RLOCATION)
 
 
 def _run_one_job(params: dict) -> None:

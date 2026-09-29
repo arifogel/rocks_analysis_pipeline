@@ -263,6 +263,7 @@ def build_step_fns(args: argparse.Namespace, noise_paths: list[str]) -> dict:
 
 
 def main() -> None:
+    stage1_steps.resolve_katydid_path()
     par, args = parse_args()
     subrun_id, field_index = resolve_subrun_and_field(par, args)
     init_logging(args.log_level, args.log_override)

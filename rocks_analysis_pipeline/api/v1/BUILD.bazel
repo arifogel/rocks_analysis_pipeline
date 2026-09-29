@@ -6,6 +6,15 @@ load("//tools:deps.bzl", "cdeps")
 
 package(default_visibility = ["//visibility:public"])
 
+# Explicit __init__.py for this package - see //rocks_analysis_pipeline:package_init_lib for the
+# same reasoning; //rocks_analysis_pipeline:package_init_lib itself covers the parent api/
+# package's __init__.py.
+py_library(
+    name = "v1_init_lib",
+    srcs = ["__init__.py"],
+    deps = ["//rocks_analysis_pipeline:package_init_lib"],
+)
+
 proto_library(
     name = "task_identity_proto",
     srcs = ["task_identity.proto"],
@@ -97,5 +106,6 @@ py_library(
         ":point_py_pb2",
         ":slew_times_py_pb2",
         ":task_identity_py_pb2",
+        ":v1_init_lib",
     ] + cdeps([requirement("protobuf")]),
 )

@@ -184,11 +184,11 @@ def sbatch_job(
     """
 
     proc = sp.run(
-        sbatch_cmd, 
-        input = script, 
+        sbatch_cmd,
+        input = script,
         check=True,
-        text=True, 
-        capture_output=hold, 
+        text=True,
+        capture_output=True,
     )
     return proc
     
