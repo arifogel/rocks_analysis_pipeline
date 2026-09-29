@@ -25,8 +25,10 @@ independently scheduled and run Slurm task sharing one array job id.
 Each task writes its own log under runs_dir/run_name/subrun_*/field_*/,
 matching where a locally-run task would.
 Second job: a single, non-array job, submitted with
---dependency=afterok:<the first job's own array id> -- Slurm starts it
-only once every task in that array has succeeded.
+--dependency=afterany:<the first job's own array id> -- Slurm starts it
+once every task in that array has finished, whether or not each one
+succeeded (afterok would instead block this job forever the moment any
+single array task fails, defeating stage2_merge_task's own --allow-missing).
 Both jobs' own sbatch stdout/stderr capture (a fallback for whatever each
 doesn't already log itself, e.g. a crash before its own logging starts)
 goes under runs_dir/run_name/slurm_logs/.
@@ -256,7 +258,7 @@ def submit_map(launcher_path: str, runfiles_dir: str, args: argparse.Namespace, 
 
 
 def submit_reduce(launcher_path: str, runfiles_dir: str, args: argparse.Namespace, map_job_id: str) -> str:
-    """Submits the reduce job, with --dependency=afterok:<map_job_id>."""
+    """Submits the reduce job, with --dependency=afterany:<map_job_id>."""
     slurm_log_dir = Path(args.runs_dir) / args.run_name / "slurm_logs"
     slurm_log_dir.mkdir(parents=True, exist_ok=True)
     log_path = slurm_log_dir / "reduce_%j.log"
@@ -267,7 +269,7 @@ def submit_reduce(launcher_path: str, runfiles_dir: str, args: argparse.Namespac
         job_name=f"{args.run_name}_reduce",
         tlim=args.merge_tlim,
         log_path=log_path,
-        dependency=f"afterok:{map_job_id}",
+        dependency=f"afterany:{map_job_id}",
     )
     return proc.stdout.strip()
 
