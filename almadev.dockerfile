@@ -21,7 +21,6 @@ RUN mkdir /work
 WORKDIR /work
 RUN git clone https://github.com/arifogel/rocks_analysis_pipeline
 WORKDIR /work/rocks_analysis_pipeline
-RUN git checkout claude-alma-bare
 
 #RUN echo 'common --override_module=ghcss=/work/ghcss' > /work/rocks_analysis_pipeline/.bazelrc.user
 #RUN  --mount=type=ssh git clone git@github.com:arifogel/ghcss /work/ghcss
