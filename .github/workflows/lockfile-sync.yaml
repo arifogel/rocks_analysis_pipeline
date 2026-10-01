@@ -28,10 +28,9 @@ jobs:
       - name: Configure git for private repo access
         run: git config --global url."https://${{ secrets.READ_PRIVATE_CRES_REPOS }}@github.com/".insteadOf "https://github.com/"
 
-      # Regenerating MODULE.bazel.lock requires evaluating every module extension declared in
-      # MODULE.bazel, including katydid's own tools/system_deps.bzl - which requires Boost,
-      # FFTW, and MatIO to actually be present on this runner. See ci.yaml for the reasoning
-      # behind this specific set of packages and cache strategy.
+      # Regenerating MODULE.bazel.lock evaluates every module extension declared in
+      # MODULE.bazel, including katydid's tools/system_deps.bzl, which needs Boost, FFTW,
+      # and MatIO present on this runner.
       - name: Cache downloaded .deb files
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
