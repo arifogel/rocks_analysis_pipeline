@@ -3,7 +3,7 @@
 Single-task entry point for stage 1: runs the full specsims -> Katydid ->
 proto+zstd pipeline for one (run_name, subrun_id, field_index) task,
 resuming correctly from wherever a previous attempt left off. Meant to run
-as its own fresh subprocess, once per task.
+as a fresh subprocess, once per task.
 
 Flags are kebab-case (--runs-dir, not --runs_dir).
 
@@ -77,7 +77,7 @@ def parse_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
         "--job-id",
         type=int,
         default=None,
-        help="flat task index (e.g. Slurm's own $SLURM_ARRAY_TASK_ID) to derive subrun_id/field_index "
+        help="flat task index (e.g. Slurm's $SLURM_ARRAY_TASK_ID) to derive subrun_id/field_index "
         "from, given --num-fields: subrun_id = job_id // num_fields, field_index = job_id %% num_fields -- "
         "mutually exclusive with --subrun-id/--field-index",
     )
@@ -100,7 +100,7 @@ def parse_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     arg("--katydid-config", type=str, required=True, help="full path to the base katydid yaml config file")
 
     # Exactly one of --noise-id/--noise-paths. The same resolved value
-    # feeds both he6-cres-spec-sims's own noise injection (make_run_specsims)
+    # feeds both he6-cres-spec-sims's noise injection (make_run_specsims)
     # and Katydid's spec1 input (make_run_katydid): physically the same
     # underlying noise reference, not two independent options.
     noise_group = par.add_mutually_exclusive_group(required=True)
@@ -129,8 +129,8 @@ def parse_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
         "--log-level",
         type=str,
         default="INFO",
-        help="root log level for this whole run (this script's own messages and everything else via "
-        "normal logging hierarchy inheritance, including he6-cres-spec-sims's own package)",
+        help="root log level for this whole run (this script's messages and everything else via "
+        "normal logging hierarchy inheritance, including he6-cres-spec-sims's package)",
     )
     arg(
         "--log-override",
@@ -203,7 +203,7 @@ def resolve_subrun_and_field(par: argparse.ArgumentParser, args: argparse.Namesp
 
 def compute_skip_steps(args: argparse.Namespace) -> frozenset[str]:
     """Translates the parsed --keep-<x>/--keep-all flags into the set of
-    step names to pass as run_stage1_task's own skip_steps. Split out from
+    step names to pass as run_stage1_task's skip_steps. Split out from
     main() so this translation is directly testable without going through
     argparse/sys.argv.
     """
@@ -214,9 +214,9 @@ def compute_skip_steps(args: argparse.Namespace) -> frozenset[str]:
 
 def resolve_noise_paths(args: argparse.Namespace) -> list[str]:
     """Resolves this run's noise_paths from whichever of --noise-id/
-    --noise-paths was given (argparse's own required mutually exclusive
-    group guarantees exactly one is set). Split out from main() for the
-    same reason as compute_skip_steps above.
+    --noise-paths was given (argparse's required mutually exclusive group
+    guarantees exactly one is set). Split out from main() for the same
+    reason as compute_skip_steps above.
     """
     if args.noise_id is not None:
         return resolve_noise_paths_from_id(args.noise_id)
@@ -226,7 +226,7 @@ def resolve_noise_paths(args: argparse.Namespace) -> list[str]:
 def build_step_fns(args: argparse.Namespace, noise_paths: list[str]) -> dict:
     """Builds the real, complete step_fns dict for this run: everything
     from stage1_steps.STEP_FNS, with its two placeholders (specsims_done,
-    katydid_done) replaced by real closures built from this run's own
+    katydid_done) replaced by real closures built from this run's
     CLI-provided config. Split out from main() for the same reason as
     compute_skip_steps above. noise_paths is passed in already resolved by
     resolve_noise_paths rather than recomputed here, so both closures below

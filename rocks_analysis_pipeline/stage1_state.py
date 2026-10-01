@@ -1,10 +1,10 @@
 """Stage 1 combines three per-task steps -- running specsims, running
 Katydid, then converting both tools' output to proto+zstd -- into a single
-unit of work meant to run entirely on one wulf node: specsims's own
-bands.csv/dmtracks.csv output each get their own proto+zstd conversion,
-independent of Katydid, and Katydid's own .root/slew-time output each get
-their own proto+zstd conversion in turn. The .speck, .root, and slew-time
-files never need to leave that node's local scratch.
+unit of work meant to run entirely on one wulf node: specsims's
+bands.csv/dmtracks.csv output each get a proto+zstd conversion,
+independent of Katydid, and Katydid's .root/slew-time output each get a
+proto+zstd conversion in turn. The .speck, .root, and slew-time files
+never need to leave that node's local scratch.
 
 Only ever one acquisition per subrun (acquisition fixed at 0, decided
 explicitly rather than left implicit -- see the proto schema, where it's
@@ -13,29 +13,29 @@ omitted entirely rather than stored as an always-0 field).
 Naming note: task_dir is keyed on task identity alone (run_name, subrun_id,
 field_index) -- the field value is data that belongs inside the task's
 config/output, not something a caller needs to already know just to compute
-where the task's own directory lives.
+where the task's directory lives.
 
 State model: one flat, strictly ordered list of named steps (STEPS below),
-each with its own on-disk checkpoint marker -- not a hand-maintained state
-enum. Every step, whether it does real compute (specsims, Katydid, the
-proto conversion) or just cleanup (compressing/deleting the log, deleting a
+each with an on-disk checkpoint marker -- not a hand-maintained state enum.
+Every step, whether it does real compute (specsims, Katydid, the proto
+conversion) or just cleanup (compressing/deleting the log, deleting a
 previous step's output), happens in exactly one fixed sequence, each
 strictly after the one before it. A flat list gives every property that
-matters for free: idempotence (a step's own marker existing means skip it),
+matters for free: idempotence (a step's marker existing means skip it),
 resumability (run the list in order; already-done steps are no-ops), and a
 "how far did this task get" query (the name of the furthest marker that
 exists) -- with no separate categorization of "progress" vs. "cleanup"
 steps needed, since a linear sequence has no combinatorial state space to
 worry about regardless of what each step is named or does.
 
-Deletion steps are still their own separate entries in the list, distinct
-from the step that justifies them (e.g. "delete .speck files" is its own
-step after "katydid_done", not folded into it): a task killed after
-deleting output but before its own marker gets written must not look
-identical to one that never deleted anything. Retrying an already-done
-deletion is fine (check-then-skip, or just tolerate ENOENT); silently
-having a compute step's own output deleted out from under it, with no
-record that this was expected, is not.
+Deletion steps are separate entries in the list, distinct from the step
+that justifies them (e.g. "delete .speck files" is a separate step after
+"katydid_done", not folded into it): a task killed after deleting output
+but before its marker gets written must not look identical to one that
+never deleted anything. Retrying an already-done deletion is fine
+(check-then-skip, or just tolerate ENOENT); silently having a compute
+step's output deleted out from under it, with no record that this was
+expected, is not.
 """
 
 from pathlib import Path
@@ -49,9 +49,9 @@ STEP_SPECSIMS_DONE = "specsims_done"
 STEP_SPECSIMS_LOG_COMPRESSED = "specsims_log_compressed"
 STEP_UNCOMPRESSED_SPECSIMS_LOG_DELETED = "uncompressed_specsims_log_deleted"
 # bands.csv, dmtracks.csv, tracks.csv (from Katydid's .root), and
-# slew-times each get their own proto conversion step: each is a
-# separate, independently useful artifact, so bundling their conversion
-# together would just mean unbundling it again downstream for no benefit.
+# slew-times each get a proto conversion step: each is a separate,
+# independently useful artifact, so bundling their conversion together
+# would just mean unbundling it again downstream for no benefit.
 # Deletion stays grouped per source (mc_truth_deleted covers both
 # bands.csv and dmtracks.csv; katydid_output_deleted covers both .root
 # and slew-times) rather than also going fully per-artifact: deletion is
@@ -63,8 +63,8 @@ STEP_BANDS_PROTO_DONE = "bands_proto_done"
 STEP_DMTRACKS_PROTO_DONE = "dmtracks_proto_done"
 STEP_MC_TRUTH_DELETED = "mc_truth_deleted"  # bands.csv + dmtracks.csv, once converted
 STEP_KATYDID_DONE = "katydid_done"
-# Katydid's own log gets the same compress-then-delete-uncompressed
-# treatment as specsims's own log, entirely independent of it: gated on
+# Katydid's log gets the same compress-then-delete-uncompressed
+# treatment as specsims's log, entirely independent of it: gated on
 # katydid_done rather than specsims_done, since katydid.log doesn't exist
 # until Katydid has run.
 STEP_KATYDID_LOG_COMPRESSED = "katydid_log_compressed"
@@ -103,10 +103,10 @@ def task_dir(*, runs_dir: Path, run_name: str, subrun_id: int, field_index: int)
 
 def parse_task_dir(d: Path) -> tuple[str, int, int]:
     """The inverse of task_dir: recovers (run_name, subrun_id, field_index)
-    from a task's own directory path. A step function receives only
-    task_dir, so this is the only way to recover these three values, e.g.
-    to build a TaskIdentity. Safe to parse back out this way specifically
-    because task_dir's own path structure
+    from a task's directory path. A step function receives only task_dir,
+    so this is the only way to recover these three values, e.g. to build a
+    TaskIdentity. Safe to parse back out this way specifically because
+    task_dir's path structure
     (runs_dir/run_name/subrun_{id}/field_{index}) is a stable convention
     this same module defines and controls, unlike parsing a physical
     quantity such as a field value out of a display string: the field
@@ -121,7 +121,7 @@ def parse_task_dir(d: Path) -> tuple[str, int, int]:
 
 def get_state(*, runs_dir: Path, run_name: str, subrun_id: int, field_index: int) -> str | None:
     """Returns the name of the furthest-completed step for this task (per
-    STEPS's own order), or None if nothing has been checkpointed yet.
+    STEPS's order), or None if nothing has been checkpointed yet.
     Derived purely from which marker files exist on disk -- not tracked
     separately -- so a resumed/retried task (or an external monitoring
     query) can always determine exactly where a task stands just by looking
@@ -161,21 +161,21 @@ def run_stage1_task(
             step = next_step(step)
 
     step_fns maps each entry in STEPS to the function that performs it
-    (taking this task's own task_dir as its only argument) -- injected
-    rather than hardcoded here, since the real implementations (the actual
+    (taking this task's task_dir as its only argument) -- injected rather
+    than hardcoded here, since the real implementations (the actual
     specsims/Katydid subprocess calls, the actual proto+zstd conversion)
     depend on per-run configuration such as Katydid command-line wiring and
-    the proto schema. Each step function must produce its own output
-    safely and resumably if rerun from a partial attempt: run_checkpointed
-    guards against re-running a step that's already fully done, not
-    against a step partially completing.
+    the proto schema. Each step function must produce its output safely
+    and resumably if rerun from a partial attempt: run_checkpointed guards
+    against re-running a step that's already fully done, not against a
+    step partially completing.
 
     skip_steps names steps to treat as skipped(step) above: neither
     step_fns[step] nor its checkpoint marker gets written, so a skipped
     step is re-evaluated (and re-skipped) on every future call rather than
-    being permanently recorded as done. A kept step's own delete action,
-    and only that action, never runs and never gets checkpointed, while
-    every other step proceeds normally.
+    being permanently recorded as done. A kept step's delete action, and
+    only that action, never runs and never gets checkpointed, while every
+    other step proceeds normally.
     """
     d = task_dir(runs_dir=runs_dir, run_name=run_name, subrun_id=subrun_id, field_index=field_index)
     d.mkdir(parents=True, exist_ok=True)
