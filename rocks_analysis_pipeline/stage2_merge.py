@@ -45,7 +45,7 @@ from typing import Callable, NamedTuple, TypeVar
 import compression.zstd as zstd
 
 from rocks_analysis_pipeline.api.v1 import band_pb2, dmtrack_pb2, event_pb2, point_pb2
-from rocks_analysis_pipeline.stage1_state import parse_task_dir
+from rocks_analysis_pipeline.stage1_state import task_dir
 from rocks_analysis_pipeline.stage1_steps import (
     BANDS_PROTO_FILENAME,
     DMTRACKS_PROTO_FILENAME,
@@ -59,66 +59,58 @@ ListMessage = TypeVar("ListMessage")
 
 
 class ChunkScope(NamedTuple):
-    """One reduce chunk's slice of a run: its 0-based position among the
-    run's chunks, and the (uniform, run-wide) max tasks per chunk -- the
-    same two values wulf_ssa.py's own --chunk-size chunking uses, so a
-    chunk's own identity never depends on anything else about the run
-    (how many chunks it has, how many tasks the last one happens to get).
+    """One reduce chunk's own job id range: job_id_start through job_id_end,
+    both inclusive, plus the num_fields value those job ids were derived
+    from (matching stage1_task.py's own --job-id/--num-fields derivation:
+    subrun_id = job_id // num_fields, field_index = job_id % num_fields).
+    All three are needed together to compute the chunk's own task
+    directories by pure arithmetic, with no directory listing involved.
     """
 
-    chunk_index: int
-    chunk_size: int
+    job_id_start: int  # inclusive
+    job_id_end: int  # inclusive
+    num_fields: int
 
 
 def _chunked_filename(filename: str, chunk: ChunkScope) -> str:
-    """filename with -<chunk index> inserted before every extension
-    (bands.pb.zst -> bands-0.pb.zst), unpadded -- nothing here needs to
-    know how many chunks the run has in total.
+    """filename with _<job id start>-<job id end> inserted before every
+    extension (bands.pb.zst -> bands_0-999.pb.zst): both numbers are job
+    ids actually in this chunk, since job_id_start and job_id_end are both
+    inclusive.
     """
     stem, _, ext = filename.partition(".")
-    return f"{stem}-{chunk.chunk_index}.{ext}"
-
-
-def _all_task_dirs(runs_dir: Path, run_name: str) -> list[Path]:
-    """Every stage-1 task directory for this run, in the same order
-    wulf_ssa.py's own flat job_id = subrun_id * num_fields + field_index
-    enumeration produces -- sorted numerically by (subrun_id, field_index),
-    not lexicographically by path string (subrun_10 would otherwise sort
-    before subrun_2). Discovered by globbing rather than computed from an
-    expected count, so this merges whatever stage 1 actually produced
-    (matching local_ssa_post_processing.py's own glob-based discovery, not
-    stage1's own explicit range(num_subruns)/range(num_fields) computation
-    -- there's no equivalent here of json_config's own fields_T to compute
-    an expected count from, and glob discovery is what lets this run
-    standalone against partial or already-cleaned-up runs).
-    """
-    dirs = (runs_dir / run_name).glob("subrun_*/field_*")
-    return sorted(dirs, key=lambda d: parse_task_dir(d)[1:])
+    return f"{stem}_{chunk.job_id_start}-{chunk.job_id_end}.{ext}"
 
 
 def find_task_dirs(runs_dir: Path, run_name: str, chunk: ChunkScope | None = None) -> list[Path]:
-    """Every stage-1 task directory for this run (chunk=None), or just one
-    chunk's own slice of them (chunk=<a ChunkScope>): position
-    [chunk_index*chunk_size : chunk_index*chunk_size+chunk_size] of
-    _all_task_dirs's own order.
+    """Every stage-1 task directory for this run (chunk=None), or just the
+    task directories for one chunk's own job id range (chunk=<a ChunkScope>).
 
-    Safe without knowing num_fields, or the run's true total task count,
-    because run_stage1_task's own task_dir.mkdir happens unconditionally as
-    its very first action, before any step runs -- so by the time a chunk's
-    reduce job starts (--dependency=afterany on that chunk's whole map
-    array), every task dispatched to that array has its directory on disk,
-    whether or not the task itself succeeded. Slicing _all_task_dirs's
-    actual, already-on-disk list this way lands on exactly the same set
-    job_id arithmetic would have, without computing it -- and the last
-    chunk's slice simply comes up short against the list's real length,
-    rather than needing the true total task count as a separate input to
-    avoid overshooting it.
+    chunk=None matches stage1_state.task_dir's own path convention
+    (runs_dir/run_name/subrun_<id>/field_<index>), discovered by globbing
+    rather than computed from an expected count, so this merges whatever
+    stage 1 actually produced (matching local_ssa_post_processing.py's own
+    glob-based discovery, not stage1's own explicit range(num_subruns)/
+    range(num_fields) computation -- there's no equivalent here of
+    json_config's own fields_T to compute an expected count from, and glob
+    discovery is what lets this run standalone against partial or
+    already-cleaned-up runs).
+
+    chunk=<a ChunkScope> instead computes the chunk's task dirs directly
+    from its job id range, via the same job_id -> (subrun_id, field_index)
+    derivation stage1_task.py's own --job-id/--num-fields uses -- the
+    expected set is already known exactly, so no glob is needed. A task dir
+    that doesn't exist on disk is still returned: check_all_files_present
+    and _merge_one_type already treat every one of its (necessarily absent)
+    files as missing, the same as a directory that exists but is
+    incomplete.
     """
-    all_dirs = _all_task_dirs(runs_dir, run_name)
     if chunk is None:
-        return all_dirs
-    start = chunk.chunk_index * chunk.chunk_size
-    return all_dirs[start : start + chunk.chunk_size]
+        return sorted((runs_dir / run_name).glob("subrun_*/field_*"))
+    return [
+        task_dir(runs_dir, run_name, *divmod(job_id, chunk.num_fields))
+        for job_id in range(chunk.job_id_start, chunk.job_id_end + 1)
+    ]
 
 
 def _read_proto_zst(message_cls: Callable[[], ListMessage], path: Path) -> ListMessage:

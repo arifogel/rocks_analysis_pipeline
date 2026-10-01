@@ -17,10 +17,10 @@ Input: a run name, a base specsims yaml/json config, a katydid config,
 and a noise reference (--noise-id or --noise-paths) -- see --help for the
 full set.
 
-Output: four files per chunk under runs_dir/run_name/ -- bands-<n>.pb.zst,
-dmtracks-<n>.pb.zst, events-<n>.pb.zst, points-<n>.pb.zst, <n> the chunk's
-0-based index -- see stage2_merge.py's own ChunkScope/_chunked_filename
-doc comments. The
+Output: four files per chunk under runs_dir/run_name/ -- bands_<a>-<b>.pb.zst,
+dmtracks_<a>-<b>.pb.zst, events_<a>-<b>.pb.zst, points_<a>-<b>.pb.zst, <a>-<b>
+that chunk's own inclusive job id range -- see stage2_merge.py's own
+ChunkScope/_chunked_filename doc comments. The
 unsuffixed bands.pb.zst/etc. local_ssa.py itself produces is a single-chunk
 special case of the same four files, not something this script also writes.
 
@@ -264,12 +264,13 @@ def build_reduce_command(
     launcher_path: str,
     runfiles_dir: str,
     args: argparse.Namespace,
-    chunk_index: int,
+    num_fields: int,
+    offset: int,
+    chunk_size: int,
 ) -> str:
-    """Builds the shell command one chunk's reduce job runs -- --chunk-index
-    (plus --chunk-size, matching this run's own --chunk-size) scopes it to
-    this chunk's own slice of the run's task directories and filename
-    suffix (see stage2_merge_task.py's own --help).
+    """Builds the shell command one chunk's reduce job runs -- the
+    --chunk-* flags scope it to this chunk's own, inclusive job id range
+    and filename suffix (see stage2_merge_task.py's own --help).
     """
     parts = [
         f"RUNFILES_DIR={shlex.quote(runfiles_dir)}",
@@ -278,8 +279,9 @@ def build_reduce_command(
         "stage2_merge_task",
         shlex.quote(f"--runs-dir={args.runs_dir}"),
         shlex.quote(f"--run-name={args.run_name}"),
-        shlex.quote(f"--chunk-index={chunk_index}"),
-        shlex.quote(f"--chunk-size={args.chunk_size}"),
+        shlex.quote(f"--chunk-job-id-start={offset}"),
+        shlex.quote(f"--chunk-job-id-end={offset + chunk_size - 1}"),
+        shlex.quote(f"--chunk-num-fields={num_fields}"),
     ]
     if args.allow_missing:
         parts.append("--allow-missing")
@@ -326,7 +328,10 @@ def submit_reduce_chunk(
     launcher_path: str,
     runfiles_dir: str,
     args: argparse.Namespace,
+    num_fields: int,
     chunk_index: int,
+    offset: int,
+    chunk_size: int,
     map_job_id: str,
 ) -> str:
     """Submits one chunk's reduce job, with --dependency=afterany:<that chunk's own map job id>."""
@@ -334,7 +339,7 @@ def submit_reduce_chunk(
     slurm_log_dir.mkdir(parents=True, exist_ok=True)
     log_path = slurm_log_dir / f"reduce_chunk{chunk_index}_%j.log"
 
-    cmd = build_reduce_command(launcher_path, runfiles_dir, args, chunk_index)
+    cmd = build_reduce_command(launcher_path, runfiles_dir, args, num_fields, offset, chunk_size)
     proc = sbatch_job(
         cmd=cmd,
         job_name=f"{args.run_name}_reduce_chunk{chunk_index}",
@@ -371,7 +376,7 @@ def main() -> None:
             logger.info(
                 "[dry_run] chunk %d reduce command:\n%s",
                 chunk_index,
-                build_reduce_command(launcher_path, runfiles_dir, args, chunk_index),
+                build_reduce_command(launcher_path, runfiles_dir, args, num_fields, offset, chunk_size),
             )
         return
 
@@ -379,7 +384,9 @@ def main() -> None:
         map_job_id = submit_map_chunk(launcher_path, runfiles_dir, args, num_fields, chunk_index, offset, chunk_size)
         logger.info("submitted map chunk %d: job %s (%d tasks)", chunk_index, map_job_id, chunk_size)
 
-        reduce_job_id = submit_reduce_chunk(launcher_path, runfiles_dir, args, chunk_index, map_job_id)
+        reduce_job_id = submit_reduce_chunk(
+            launcher_path, runfiles_dir, args, num_fields, chunk_index, offset, chunk_size, map_job_id
+        )
         logger.info(
             "submitted reduce chunk %d: job %s (runs after map chunk %d's job %s completes)",
             chunk_index,
