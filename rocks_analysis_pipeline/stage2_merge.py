@@ -39,8 +39,9 @@ output already exists on disk.
 """
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, NamedTuple, TypeVar
+from typing import Callable, TypeVar
 
 import compression.zstd as zstd
 
@@ -58,7 +59,8 @@ logger = logging.getLogger(__name__)
 ListMessage = TypeVar("ListMessage")
 
 
-class ChunkScope(NamedTuple):
+@dataclass(frozen=True, kw_only=True, slots=True)
+class ChunkScope:
     """One reduce chunk's own job id range: job_id_start through job_id_end,
     both inclusive, plus the num_fields value those job ids were derived
     from (matching stage1_task.py's own --job-id/--num-fields derivation:
