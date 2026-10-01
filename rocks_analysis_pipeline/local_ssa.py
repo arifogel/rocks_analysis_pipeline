@@ -2,88 +2,42 @@
 """
 Local, parallel orchestration driver for this project's ssa (spec-sims and
 analysis) pipeline: fans out stage1_task across every (subrun_id,
-field_index) task for a run, via a ThreadPoolExecutor, not a
-ProcessPoolExecutor -- see the reasoning below -- then, once every task has
-completed successfully, calls stage2_merge.run_stage2_merge directly
-in-process (no subprocess: unlike stage1_task, there's no crash-isolation
-need for a pure read-and-merge step) to merge that run's own bands/
-dmtracks/events/points into runs_dir/run_name/{bands,dmtracks,events,
-points}.pb.zst (see stage2_merge.py's own module doc comment for the real
-logic).
+field_index) task for a run via a ThreadPoolExecutor, then, once every
+task has completed successfully, merges that run's own bands/dmtracks/
+events/points into runs_dir/run_name/{bands,dmtracks,events,points}.pb.zst
+by calling stage2_merge.run_stage2_merge directly in-process.
 
-Crash isolation is achieved by stage1_task itself running as its own fresh
-subprocess, once per task -- not by this orchestrator's own worker being a
-separate process. A hard crash (segfault, OOM-kill) inside one task's own
-Simulation.run_full() or Katydid invocation only ever kills that task's own
-subprocess, never this orchestrator or any other task's own worker. Given
-that, a ThreadPoolExecutor is the right tool here, not a ProcessPoolExecutor:
-each worker thread is mostly just waiting on a subprocess (I/O-bound, not
-CPU-bound in this process), matching cresproc/model.py's own reasoning for
-using threads over processes for comparable I/O-bound work.
+Crash isolation comes from stage1_task running as its own fresh
+subprocess, once per task, not from this orchestrator's own worker being a
+separate process: a hard crash (segfault, OOM-kill) inside one task's
+Simulation.run_full() or Katydid invocation only ever kills that task's
+own subprocess. A ThreadPoolExecutor is the right tool given that: each
+worker thread mostly just waits on a subprocess, so it's I/O-bound rather
+than CPU-bound in this process.
 
-Each task's own subprocess is this process's own sys.executable, running
-`-m rocks_analysis_pipeline.stage1_task` -- not stage1_task's own
-bazel-generated py_binary launcher, and not a resolved path to
-stage1_task.py's own source file. Two earlier, wrong approaches got as
-far as being committed before this one, both real bugs, not refinements:
-
-First: invoking stage1_task's own py_binary launcher directly, once per
-task. That launcher creates and manages its own separate, per-binary venv
-every time it runs, and a fresh runfiles tree gets created on every single
-invocation -- confirmed directly against a real crash, not assumed -- so
-many tasks' own launchers racing to set up that same venv concurrently
-produced a real, reproducible crash (a different failure message each
-time, depending on exactly how two invocations collided).
-
-Second: keeping sys.executable, but resolving stage1_task.py's own source
-file via runfiles.Rlocation and warming up stage1_task's own venv exactly
-once before any tasks start, then invoking that venv's own python3
-directly against the resolved source path. This failed for a more basic
-reason: a source file's own resolved runfile is very often just a symlink
-straight back into the actual checkout, with no reliable "runfiles root"
-to derive stage1_task's own venv path by walking up from it -- confirmed
-directly against a real crash (a RuntimeError from a nonsense derived
-path), not assumed.
-
-The actual fix addresses the real, underlying cause directly instead of
-working around it: this process's own venv didn't have stage1_task's own
-package deps (numpy, uproot, he6-cres-spec-sims, etc.) only because
-BUILD.bazel's own local_ssa target depended on :stage1_task as a data
-dependency (bundling its files) rather than :stage1_task_lib as a real
-deps dependency (pulling in its own package deps too) -- each
-aspect_rules_py venv is built from its own target's own deps, not from
-what a data dependency happens to bundle in. With that fixed, this
-process's own venv genuinely has everything stage1_task itself needs, so
-sys.executable is exactly the right interpreter after all, and `-m
-stage1_task` needs no resolved file path at all -- Python's own import
-machinery finds it directly, sidestepping runfiles-path-guessing
-entirely. This also means no separate venv, and no warm-up step (in-band
-or manual), is needed anywhere: there is only ever the one venv, this
-process's own, set up once by bazel's own launcher before any tasks run.
+Each task's subprocess is this process's own sys.executable running `-m
+rocks_analysis_pipeline.stage1_task`, which needs no resolved file path --
+Python's own import machinery finds the module directly. This process's
+venv already carries every package stage1_task itself needs (numpy,
+uproot, he6-cres-spec-sims, etc.), so no separate venv or warm-up step is
+needed anywhere: there is only ever the one venv, set up once by bazel's
+own launcher before any tasks run.
 
 Because multiple worker threads share this one process's root logger, each
-log record is tagged with which task its own thread is currently on (via a
-contextvars.ContextVar + logging.Filter -- the same mechanism
-cresproc/model.py's own SubprocessContextFilter uses for its own
-process-pool workers, adapted here for threads instead), otherwise
-concurrent tasks' own "starting"/"finished" messages would be
-indistinguishable on this orchestrator's own shared console. This is this
-orchestrator's own, brief per-task status only; stage1_task's own full
-per-task detail (the katydid command, row counts, etc.) already goes to its
-own stage1_task.log, written by stage1_task's own main() every time it runs
-as a fresh subprocess (init_logging is called there, same as here, since a
-subprocess doesn't inherit this process's own logging config) -- nothing
-about that needs reinitializing or redirecting from here.
+log record is tagged with which task its own thread is currently on, via a
+contextvars.ContextVar and a logging.Filter, so concurrent tasks' own
+"starting"/"finished" messages stay distinguishable on this orchestrator's
+own shared console. This is this orchestrator's own, brief per-task status
+only; stage1_task's own full per-task detail (the katydid command, row
+counts, etc.) goes to its own stage1_task.log, written by stage1_task's
+own main() every time it runs as a fresh subprocess.
 
-Flags are kebab-case, matching stage1_task.py's own convention -- and, for
-every flag this shares a concept with (--runs-dir, --run-name,
---yaml-config, --json-config, --initial-seed, --katydid-config,
---noise-id/--noise-paths, --use-ghcss, --log-level, --log-override, every
---keep-<x>), the name here is identical to stage1_task.py's own, not just
-similarly named -- so a value copied from one CLI's own --help works
-unchanged on the other. Deliberately different from local_spec_sims.py/
-local_ssa_katydid.py's own snake_case convention for this same kind of
-orchestration-layer file.
+Flags are kebab-case, matching stage1_task's own convention. For every
+flag this shares a concept with (--runs-dir, --run-name, --yaml-config,
+--json-config, --initial-seed, --katydid-config, --noise-id/--noise-paths,
+--use-ghcss, --log-level, --log-override, every --keep-<x>), the name here
+is identical to stage1_task's own, not just similarly named, so a value
+copied from one CLI's own --help works unchanged on the other.
 
 Example:
     bazel run --@pypi//venv=dev //:local_ssa -- \\
@@ -116,20 +70,17 @@ from rocks_analysis_pipeline.stage2_merge import run_stage2_merge
 
 logger = logging.getLogger(__name__)
 
-# stage1_task's own per-task log, written by stage1_task.py's own main()
-# every time it runs (a fresh process, so it calls init_logging itself --
-# see this module's own docstring). Named analogously to
+# stage1_task's own per-task log, written by stage1_task's own main()
+# every time it runs as a fresh process. Named analogously to
 # stage1_steps.SPECSIMS_LOG_FILENAME/KATYDID_LOG_FILENAME, which live
 # alongside it in the same task_dir.
 STAGE1_TASK_LOG_FILENAME = "stage1_task.log"
 
-# Maps each --keep-<x> flag on *this* CLI to the matching stage1_task.py
-# flag to pass through unchanged -- both sides use the identical flag name
-# (see this module's own doc comment on why), so this is a straight
-# identity map; kept explicit anyway, matching stage1_task.py's own
-# KEEP_FLAG_STEPS pattern of a table rather than blind forwarding, so a
-# flag added to one file doesn't silently start (or stop) passing through
-# without a matching, visible entry here.
+# Maps each --keep-<x> flag on this CLI to the matching stage1_task flag
+# to pass through unchanged. Both sides use the identical flag name, so
+# this is a straight identity map, kept explicit as a table rather than
+# blind forwarding, so a flag added to one file doesn't silently start (or
+# stop) passing through without a matching, visible entry here.
 KEEP_FLAG_PASSTHROUGH: dict[str, str] = {
     "keep_uncompressed_specsims_log": "--keep-uncompressed-specsims-log",
     "keep_mc_truth": "--keep-mc-truth",
@@ -140,7 +91,7 @@ KEEP_FLAG_PASSTHROUGH: dict[str, str] = {
 }
 
 # Per-thread task label, injected into every log record via
-# _TaskContextFilter below -- see this module's own docstring.
+# _TaskContextFilter below.
 _task_ctx: contextvars.ContextVar[str] = contextvars.ContextVar("task_ctx", default="-")
 
 
@@ -156,28 +107,27 @@ def parse_args() -> argparse.Namespace:
     par = argparse.ArgumentParser()
     arg = par.add_argument
 
-    # Kebab-case throughout, no short aliases -- matching stage1_task.py's
-    # own style exactly (see this module's own doc comment on why), not
-    # local_spec_sims.py/local_ssa_katydid.py's own snake_case-plus-short-
-    # alias convention.
+    # Kebab-case throughout, no short aliases, matching stage1_task's own
+    # style: both CLIs use the identical flag name for every shared
+    # concept.
     arg("--run-name", type=str, required=True, help="run name")
-    arg("--runs-dir", type=str, required=True, help="base output directory for runs, matching stage1_task.py's own --runs-dir")
-    arg("--yaml-config", type=str, required=True, help="base specsims yaml config, matching stage1_task.py's own --yaml-config")
+    arg("--runs-dir", type=str, required=True, help="base output directory for runs, matching stage1_task's own --runs-dir")
+    arg("--yaml-config", type=str, required=True, help="base specsims yaml config, matching stage1_task's own --yaml-config")
     arg(
         "--json-config",
         type=str,
         required=True,
-        help="base specsims json config (fields_T/traps_A/etc.), matching stage1_task.py's own "
+        help="base specsims json config (fields_T/traps_A/etc.), matching stage1_task's own "
         "--json-config -- also where this driver reads len(fields_T) from, to enumerate "
         "field_index values",
     )
     arg("--num-subruns", type=int, required=True, help="number of subruns, 0..num-subruns-1")
-    arg("--initial-seed", type=int, default=0, help="seed for subrun_id=0, matching stage1_task.py's own --initial-seed")
+    arg("--initial-seed", type=int, default=0, help="seed for subrun_id=0, matching stage1_task's own --initial-seed")
     arg("--katydid-config", type=str, required=True, help="full path to the base katydid yaml config file")
 
-    # Exactly one of --noise-id/--noise-paths, matching stage1_task.py's
-    # own mutually exclusive group exactly (see that file's own doc
-    # comment) -- passed through unchanged to every task.
+    # Exactly one of --noise-id/--noise-paths, matching stage1_task's own
+    # mutually exclusive group exactly, passed through unchanged to every
+    # task.
     noise_group = par.add_mutually_exclusive_group(required=True)
     noise_group.add_argument("--noise-id", type=int, help="run_id to look up for noise floor -- mutually exclusive with --noise-paths")
     noise_group.add_argument(
@@ -222,10 +172,10 @@ def parse_args() -> argparse.Namespace:
 def build_jobs(args: argparse.Namespace) -> list[dict[str, Any]]:
     """Enumerates every (subrun_id, field_index) task for this run.
 
-    Unlike local_spec_sims.py's own build_jobs, this needs no upfront
-    config generation to discover field_index values (stage1_task.py's own
-    make_run_specsims renders each task's own specsims.yaml itself, inside
-    the task) -- just len(fields_T) from json_config, read once here.
+    No upfront config generation is needed to discover field_index values,
+    since stage1_task's own make_run_specsims renders each task's own
+    specsims.yaml itself, inside the task -- just len(fields_T) from
+    json_config, read once here.
     """
     with open(args.json_config) as f:
         run_params = json.load(f)
@@ -240,12 +190,9 @@ def build_jobs(args: argparse.Namespace) -> list[dict[str, Any]]:
 
 def build_task_command(args: argparse.Namespace, job: dict[str, Any]) -> list[str]:
     """Builds the stage1_task command line for one task: this process's own
-    sys.executable running `-m rocks_analysis_pipeline.stage1_task` -- see
-    this module's own docstring for why this, and not stage1_task's own
-    py_binary launcher or a resolved path to its source file, is correct.
-    Split out from
-    _run_one_task so this half -- the part with real, checkable logic --
-    is directly testable without actually invoking anything.
+    sys.executable running `-m rocks_analysis_pipeline.stage1_task`. Split
+    out from _run_one_task so this half -- the part with real, checkable
+    logic -- is directly testable without actually invoking anything.
     """
     command = [
         sys.executable,
@@ -281,10 +228,8 @@ def build_task_command(args: argparse.Namespace, job: dict[str, Any]) -> list[st
 
 
 def _run_one_task(args: argparse.Namespace, job: dict[str, Any]) -> Path:
-    """Runs a single (subrun, field) task as its own fresh subprocess --
-    see this module's own docstring for why a subprocess (crash isolation)
-    and why a ThreadPoolExecutor rather than a ProcessPoolExecutor is what
-    fans these out. Returns the task's own log path, for the caller's own
+    """Runs a single (subrun, field) task as its own fresh subprocess, for
+    crash isolation. Returns the task's own log path, for the caller's own
     completion message.
     """
     task_label = f"subrun {job['subrun_id']} field {job['field_index']}"
@@ -296,9 +241,9 @@ def _run_one_task(args: argparse.Namespace, job: dict[str, Any]) -> Path:
 
         command = build_task_command(args, job)
         logger.info("starting")
-        # buffering=1 (line-buffered): same reasoning as local_spec_sims.py's
-        # own _run_one_job -- without it, a log file tailed mid-run can lag
-        # far behind or show nothing, even though the task is progressing.
+        # buffering=1 (line-buffered): without it, a log file tailed
+        # mid-run can lag far behind or show nothing, even though the task
+        # is progressing.
         with open(log_path, "w", buffering=1) as log_file:
             subprocess.run(command, stdout=log_file, stderr=subprocess.STDOUT, check=True)
         logger.info("finished (log: %s)", log_path)
@@ -313,8 +258,7 @@ def main() -> None:
 
     # Attach the per-task context filter to every handler init_logging just
     # configured (its own basicConfig call), and extend their format to
-    # include the injected task label -- see this module's own docstring
-    # and _TaskContextFilter above.
+    # include the injected task label -- see _TaskContextFilter above.
     task_filter = _TaskContextFilter()
     for handler in logging.getLogger().handlers:
         handler.addFilter(task_filter)

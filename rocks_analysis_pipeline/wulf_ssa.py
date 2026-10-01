@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 wulf orchestration driver for this project's simulate-and-analyze pipeline:
-local_ssa.py's direct sibling, submitting Slurm jobs instead of running
-local subprocesses.
+submits Slurm jobs instead of running local subprocesses.
 
 Map: every (subrun, field) simulation+analysis task for a run, run in
 parallel on wulf's compute nodes, chunked into one or more Slurm job
@@ -19,10 +18,7 @@ full set.
 
 Output: four files per chunk under runs_dir/run_name/ -- bands_<a>-<b>.pb.zst,
 dmtracks_<a>-<b>.pb.zst, events_<a>-<b>.pb.zst, points_<a>-<b>.pb.zst, <a>-<b>
-that chunk's inclusive job id range -- see stage2_merge.py's
-ChunkScope/_chunked_filename doc comments. The
-unsuffixed bands.pb.zst/etc. local_ssa.py itself produces is a single-chunk
-special case of the same four files, not something this script also writes.
+that chunk's inclusive job id range.
 
 Side effects: one map sbatch invocation per chunk, each immediately followed by that
 chunk's reduce sbatch invocation. Map: every (subrun, field) pair, one Slurm task
@@ -42,11 +38,9 @@ Execution environment: run this script on cenpa-wulf's head node; it does
 no simulation, analysis, or merge work itself, only submits jobs that do.
 
 Each map task gets a single flat $SLURM_ARRAY_TASK_ID from Slurm,
-translated into (subrun_id, field_index) via stage1_task.py's
---job-id/--num-fields. The reduce job runs stage2_merge_task.py. (This
-project's vocabulary for these two phases, used throughout the rest of
-the codebase -- e.g. stage1_task.py, stage2_merge.py -- is "stage
-1"/"stage 2", should further reading lead there.)
+translated into (subrun_id, field_index) via stage1_task's
+--job-id/--num-fields. The reduce job runs stage2_merge_task. This
+project calls these two phases "stage 1" and "stage 2" throughout.
 
 Run this script with --help for a full flag reference.
 """
@@ -96,11 +90,9 @@ def parse_args() -> argparse.Namespace:
 
     arg("--use-ghcss", action="store_true", help="pass --use-ghcss through to every simulation+analysis task")
 
-    # Job-control surface matches sbatch_ssa_katydid.py/sbatch_spec_sims.py/
-    # sbatch_ssa_post_processing.py's union exactly: --tlim is the only
-    # job-control flag any of them expose, each with its default rather
-    # than requiring it. cpus-per-task/mem/concurrency limits have no
-    # precedent in any of them and aren't included here either.
+    # --tlim is the only job-control flag exposed, with a default rather
+    # than being required. cpus-per-task/mem/concurrency limits aren't
+    # included here.
     arg(
         "--tlim",
         type=str,
@@ -269,7 +261,7 @@ def build_reduce_command(
 ) -> str:
     """Builds the shell command one chunk's reduce job runs -- the
     --chunk-* flags scope it to this chunk's inclusive job id range and
-    filename suffix (see stage2_merge_task.py's --help).
+    filename suffix.
     """
     parts = [
         f"RUNFILES_DIR={shlex.quote(runfiles_dir)}",
@@ -307,9 +299,8 @@ def submit_map_chunk(
     # %A/%a: Slurm's array-job/array-task-id placeholders, substituted by
     # Slurm itself per task. This is sbatch's stdout/stderr capture, a
     # fallback for whatever stage1_task itself doesn't already log (e.g. a
-    # crash before its init_logging even runs) -- stage1_task.py's more
-    # detailed per-task log still lands at task_dir/stage1_task.log as
-    # usual.
+    # crash before its init_logging even runs) -- stage1_task's more
+    # detailed per-task log still lands at task_dir/stage1_task.log.
     log_path = slurm_log_dir / f"map_chunk{chunk_index}_%A_%a.log"
 
     cmd = build_map_command(launcher_path, runfiles_dir, args, num_fields, job_id_offset=offset)

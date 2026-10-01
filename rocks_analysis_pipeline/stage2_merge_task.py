@@ -1,21 +1,12 @@
 #!/usr/bin/env python3
 """
-Thin CLI driver for stage 2's merge step (see stage2_merge.py's module doc
-comment for the real logic and reasoning) -- a separate entry point for
-the wulf case: stage 1 is orchestrated separately from local_ssa (see
-local_ssa.py's module doc comment on why), needing stage 2 run as a
-standalone step against whatever stage-1 output already exists on disk,
-rather than only ever in-process from local_ssa's main().
-
-Flags match local_ssa.py's --runs-dir/--run-name exactly, for the same
-reason local_ssa.py's flags match stage1_task.py's -- a value copied from
-one CLI's --help works unchanged on the other.
+Thin CLI driver for stage 2's merge step: a standalone entry point for
+running stage 2 against whatever stage-1 output already exists on disk,
+rather than only ever in-process right after a stage-1 run.
 
 The --chunk-* flags are all-or-nothing: given together, they scope the
-merge to one chunk's job id range and suffix its output filenames -- see
-stage2_merge.py's ChunkScope doc comment. wulf_ssa.py's per-chunk reduce
-job is the only caller that passes them; omitted (the default), this
-merges every task directory the run has, unsuffixed.
+merge to one chunk's job id range and suffix its output filenames; omitted
+(the default), this merges every task directory the run has, unsuffixed.
 
 Example:
     bazel run --@pypi//venv=dev //:stage2_merge_task -- \\
@@ -39,8 +30,8 @@ def parse_args() -> argparse.Namespace:
     par = argparse.ArgumentParser()
     arg = par.add_argument
 
-    arg("--runs-dir", type=str, required=True, help="base runs directory, matching local_ssa.py's --runs-dir")
-    arg("--run-name", type=str, required=True, help="run name, matching local_ssa.py's --run-name")
+    arg("--runs-dir", type=str, required=True, help="base runs directory")
+    arg("--run-name", type=str, required=True, help="run name")
     arg(
         "--allow-missing",
         action="store_true",
@@ -67,17 +58,16 @@ def parse_args() -> argparse.Namespace:
         "--chunk-num-fields",
         type=int,
         default=None,
-        help="Fields per subrun for this run, same value as stage1_task.py's --num-fields. "
-        "Needed to work out which subrun and field a job id belongs to. Must be given together "
-        "with --chunk-job-id-start and --chunk-job-id-end.",
+        help="Fields per subrun for this run. Needed to work out which subrun and field a job id "
+        "belongs to. Must be given together with --chunk-job-id-start and --chunk-job-id-end.",
     )
 
-    arg("--log-level", type=str, default="INFO", help="root log level -- see logging_setup.init_logging")
+    arg("--log-level", type=str, default="INFO", help="root log level")
     arg(
         "--log-override",
         type=str,
         default=None,
-        help="comma-separated logger_name=LEVEL overrides -- see logging_setup.init_logging",
+        help="comma-separated logger_name=LEVEL overrides",
     )
 
     args = par.parse_args()

@@ -5,22 +5,19 @@ points}.pb.zst, sibling to that run's subrun_*/ directories.
 run_stage2_merge's chunk=None default merges every task directory the run
 has into one unsuffixed set of those four files. Passing a ChunkScope
 instead merges only that chunk's task directories, into the same four
-filenames with -<chunk index> inserted before their extensions -- see
-ChunkScope's and run_stage2_merge's doc comments. wulf_ssa.py uses this to
-bound each reduce job's output and memory footprint to one map array's
-worth of tasks; local_ssa.py's usage never chunks.
+filenames with -<chunk index> inserted before their extensions. Chunking
+bounds a reduce job's output and memory footprint to one map array's worth
+of tasks.
 
 Deliberately a merge, not a flatten: each task's BandList/DMTrackList/
-EventList/PointList (already carrying its TaskIdentity -- see
-task_identity.proto's doc comment) is gathered as-is into the wrapping
-BandLists/DMTrackLists/EventLists/PointLists (see each one's doc comment
-in band.proto/dmtrack.proto/event.proto/point.proto), not exploded into
-one flat list of rows. No per-row identity is lost, and no schema change
-to Band/DMTrack/Event/Point themselves was needed for this.
+EventList/PointList already carries its own TaskIdentity, and is gathered
+as-is into the wrapping BandLists/DMTrackLists/EventLists/PointLists, not
+exploded into one flat list of rows. No per-row identity is lost, and no
+schema change to Band/DMTrack/Event/Point themselves was needed for this.
 
-slew_times is deliberately not merged here: assumed identical across every
-task of a run (same DAQ config, same simulated acquisition timing), and not
-consumed by cresproc regardless -- see this project's commit history.
+slew_times is not merged here: identical across every task of a run (same
+DAQ config, same simulated acquisition timing), and not consumed
+downstream.
 
 Strict by default: if any task directory is missing any of bands/dmtracks/
 events/points .pb.zst, run_stage2_merge refuses to write anything at all --
@@ -28,14 +25,10 @@ not just for the affected type, the whole merge doesn't start.
 allow_missing opts into the alternative: skip whatever's missing (per
 type, with a warning), merging whatever is actually there.
 
-Called directly (in-process, not as a subprocess) from local_ssa.py's
-main() after every stage-1 task for a run completes, since there's no
-crash-isolation need for a pure read-and-merge step the way there was for
-stage1_task's simulation/Katydid work. Also has a thin CLI driver
-(stage2_merge_task.py) for the wulf case: stage 1 orchestrated separately
-from this driver (see local_ssa.py's module doc comment on why), needing
-stage 2 run as a separate step against whatever stage-1 output already
-exists on disk.
+Runs in-process, not as a subprocess, since a pure read-and-merge step
+needs no crash isolation. Also has a thin CLI driver (stage2_merge_task.py)
+for running stage 2 as a separate step against whatever stage-1 output
+already exists on disk.
 """
 
 import logging
@@ -62,11 +55,11 @@ ListMessage = TypeVar("ListMessage")
 @dataclass(frozen=True, kw_only=True, slots=True)
 class ChunkScope:
     """One reduce chunk's job id range: job_id_start through job_id_end,
-    both inclusive, plus the num_fields value those job ids were derived
-    from (matching stage1_task.py's --job-id/--num-fields derivation:
-    subrun_id = job_id // num_fields, field_index = job_id % num_fields).
-    All three are needed together to compute the chunk's task directories
-    by pure arithmetic, with no directory listing involved.
+    both inclusive, plus the num_fields value those job ids are derived
+    from (subrun_id = job_id // num_fields, field_index = job_id %
+    num_fields). All three are needed together to compute the chunk's
+    task directories by pure arithmetic, with no directory listing
+    involved.
     """
 
     job_id_start: int  # inclusive
@@ -88,24 +81,19 @@ def find_task_dirs(runs_dir: Path, run_name: str, chunk: ChunkScope | None = Non
     """Every stage-1 task directory for this run (chunk=None), or just the
     task directories for one chunk's job id range (chunk=<a ChunkScope>).
 
-    chunk=None matches stage1_state.task_dir's path convention
+    chunk=None matches task_dir's path convention
     (runs_dir/run_name/subrun_<id>/field_<index>), discovered by globbing
     rather than computed from an expected count, so this merges whatever
-    stage 1 actually produced (matching local_ssa_post_processing.py's
-    glob-based discovery, not stage1's explicit range(num_subruns)/
-    range(num_fields) computation -- there's no equivalent here of
-    json_config's fields_T to compute an expected count from, and glob
-    discovery is what lets this run standalone against partial or
-    already-cleaned-up runs).
+    stage 1 actually produced and runs standalone against partial or
+    already-cleaned-up runs.
 
     chunk=<a ChunkScope> instead computes the chunk's task dirs directly
-    from its job id range, via the same job_id -> (subrun_id, field_index)
-    derivation stage1_task.py's --job-id/--num-fields uses -- the expected
-    set is already known exactly, so no glob is needed. A task dir that
-    doesn't exist on disk is still returned: check_all_files_present and
-    _merge_one_type already treat every one of its (necessarily absent)
-    files as missing, the same as a directory that exists but is
-    incomplete.
+    from its job id range (subrun_id, field_index = divmod(job_id,
+    num_fields)): the expected set is already known exactly, so no glob is
+    needed. A task dir that doesn't exist on disk is still returned:
+    check_all_files_present and _merge_one_type already treat every one of
+    its (necessarily absent) files as missing, the same as a directory
+    that exists but is incomplete.
     """
     if chunk is None:
         return sorted((runs_dir / run_name).glob("subrun_*/field_*"))
@@ -123,11 +111,9 @@ def _read_proto_zst(message_cls: Callable[[], ListMessage], path: Path) -> ListM
 
 
 def _write_proto_zst(message, path: Path) -> None:
-    """Duplicated from stage1_steps.py's _write_proto_zst (a private
-    helper there, not meant for import across a module boundary it wasn't
-    designed for) -- same reasoning as that module's resolve_specsims_path
-    duplication precedent: small, self-contained piece, not worth reaching
-    across for."""
+    """Serializes message and writes it, zstd-compressed, to path. Small
+    and self-contained enough not to share across a module boundary it
+    wasn't designed for."""
     with zstd.open(path, "wb") as f:
         f.write(message.SerializeToString())
 
@@ -168,10 +154,9 @@ def _merge_one_type(
     lists_field_name: str,
 ) -> object:
     """Generic merge for one proto type: reads filename out of every task
-    directory that has it (missing files -- a task that hasn't reached
+    directory that has it. Missing files -- a task that hasn't reached
     this step yet, or was run with --keep-<x> pointed elsewhere -- are
-    skipped, not an error, matching local_ssa_post_processing.py's "skip
-    missing .root files" precedent) and gathers each one, as-is, into
+    skipped, not an error. Gathers each one, as-is, into
     lists_message_cls's repeated lists_field_name.
     """
     merged = lists_message_cls()
@@ -211,19 +196,16 @@ def run_stage2_merge(
 ) -> None:
     """The actual stage-2 step: merges bands/dmtracks/events/points and
     writes each to runs_dir/run_name/<same filename as the per-task one>,
-    sibling to that run's subrun_*/ directories (per direct instruction on
-    the output path convention) -- or, with chunk given, merges only that
-    chunk's task directories into the same four filenames, each with
-    -<chunk index> inserted before its extension (see find_task_dirs's and
-    _chunked_filename's doc comments).
+    sibling to that run's subrun_*/ directories. With chunk given, merges
+    only that chunk's task directories into the same four filenames, each
+    with -<chunk index> inserted before its extension.
 
-    allow_missing=False (the default): refuses to write anything at all
-    if any task directory is missing any of the four expected files --
-    see check_all_files_present's doc comment. allow_missing=True skips
-    whatever's missing per type instead (with a warning), merging
-    whatever is actually there -- _merge_one_type's long-standing skip
-    logic already does this; the only thing that changes here is whether
-    check_all_files_present runs first to rule it out entirely.
+    allow_missing=False (the default) refuses to write anything at all if
+    any task directory is missing any of the four expected files.
+    allow_missing=True skips whatever's missing per type instead (with a
+    warning), merging whatever is actually there; the only thing
+    allow_missing changes is whether check_all_files_present runs first
+    to rule it out entirely.
     """
     task_dirs = find_task_dirs(runs_dir, run_name, chunk)
     if not task_dirs:

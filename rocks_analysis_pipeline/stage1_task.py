@@ -1,19 +1,11 @@
 #!/usr/bin/env python3
 """
 Single-task entry point for stage 1: runs the full specsims -> Katydid ->
-proto+zstd pipeline (see stage1_state.py/stage1_steps.py) for one
-(run_name, subrun_id, field_index) task, resuming correctly from wherever a
-previous attempt left off.
+proto+zstd pipeline for one (run_name, subrun_id, field_index) task,
+resuming correctly from wherever a previous attempt left off. Meant to run
+as its own fresh subprocess, once per task.
 
-Analogous to run_spec_sims_ghcss.py/local_ssa_katydid.py's own single-
-config/single-row logic, but for the combined stage-1 pipeline -- this is
-the thing local_ssa.py fans out across a thread pool, once per invocation
-of this file as its own fresh subprocess per task (see local_ssa.py's own
-doc comment on why a subprocess and why threads, not processes).
-
-Flags are kebab-case (--runs-dir, not --runs_dir) -- deliberately
-different from local_spec_sims.py/local_ssa_katydid.py's own snake_case
-flags, per instruction.
+Flags are kebab-case (--runs-dir, not --runs_dir).
 
 Example:
     bazel run --@pypi//venv=dev //:stage1_task -- \\
@@ -48,10 +40,10 @@ from rocks_analysis_pipeline.stage1_state import (
 
 logger = logging.getLogger(__name__)
 
-# Maps each --keep-<x> flag's argparse dest to the one delete step it nops
-# out (both the delete action itself and that step's own checkpoint --
-# see run_stage1_task's own skip_steps parameter). One entry per delete
-# step in STEPS; production steps are never skippable this way.
+# Maps each --keep-<x> flag's argparse dest to the one delete step it
+# skips (both the delete action itself and that step's checkpoint) when
+# passed to run_stage1_task's skip_steps. One entry per delete step in
+# STEPS; production steps are never skippable this way.
 KEEP_FLAG_STEPS: dict[str, str] = {
     "keep_uncompressed_specsims_log": STEP_UNCOMPRESSED_SPECSIMS_LOG_DELETED,
     "keep_mc_truth": STEP_MC_TRUTH_DELETED,
@@ -65,7 +57,7 @@ def parse_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     par = argparse.ArgumentParser()
     arg = par.add_argument
 
-    arg("--runs-dir", type=str, required=True, help="base runs directory (stage1_state.task_dir's own runs_dir)")
+    arg("--runs-dir", type=str, required=True, help="base runs directory")
     arg("--run-name", type=str, required=True)
 
     # Exactly one of {--subrun-id, --field-index} or {--job-id, --num-fields}.
@@ -97,26 +89,20 @@ def parse_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
         "subrun_id/field_index -- mutually exclusive with --subrun-id/--field-index",
     )
 
-    arg("--yaml-config", type=str, required=True, help="base specsims yaml config, matching local_spec_sims.py's own --yaml_config")
-    arg("--json-config", type=str, required=True, help="base specsims json config (fields_T/traps_A/etc.), matching local_spec_sims.py's own --json_config")
+    arg("--yaml-config", type=str, required=True, help="base specsims yaml config")
+    arg("--json-config", type=str, required=True, help="base specsims json config (fields_T/traps_A/etc.)")
     arg(
         "--initial-seed",
         type=int,
         required=True,
-        help="seed for subrun_id=0, matching local_spec_sims.py's own --initial_seed exactly "
-        "(seed = initial_seed + subrun_id)",
+        help="seed for subrun_id=0 (seed = initial_seed + subrun_id)",
     )
-    arg("--katydid-config", type=str, required=True, help="full path to the base katydid yaml config file, matching local_ssa_katydid.py's own --katydid_config")
+    arg("--katydid-config", type=str, required=True, help="full path to the base katydid yaml config file")
 
-    # Exactly one of --noise-id/--noise-paths, restoring RunSpecSims's own
-    # SQL-based noise-path resolution (run_spec_sims.py, before commit
-    # ec2a84c54c3da51efe17c6b01cc06ed19542ca15 removed it) as an option
-    # alongside directly-given paths, rather than only the latter -- see
-    # noise_paths.resolve_noise_paths_from_id's own doc comment. The same
-    # resolved value feeds both he6-cres-spec-sims's own noise injection
-    # (make_run_specsims) and Katydid's spec1 input (make_run_katydid):
-    # physically the same underlying noise reference, not two independent
-    # options.
+    # Exactly one of --noise-id/--noise-paths. The same resolved value
+    # feeds both he6-cres-spec-sims's own noise injection (make_run_specsims)
+    # and Katydid's spec1 input (make_run_katydid): physically the same
+    # underlying noise reference, not two independent options.
     noise_group = par.add_mutually_exclusive_group(required=True)
     noise_group.add_argument(
         "--noise-id",
@@ -136,16 +122,15 @@ def parse_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     arg(
         "--use-ghcss",
         action="store_true",
-        help="use the ghcss Go binary instead of he6-cres-spec-sims for the specsims step (default: "
-        "he6-cres-spec-sims) -- see make_run_specsims's own doc comment for why this isn't the default",
+        help="use the ghcss Go binary instead of he6-cres-spec-sims for the specsims step "
+        "(default: he6-cres-spec-sims)",
     )
     arg(
         "--log-level",
         type=str,
         default="INFO",
-        help="root log level for this whole run (stage1_task's own messages, and everything else via "
-        "normal logging hierarchy inheritance, including he6-cres-spec-sims's own package -- see "
-        "make_run_specsims's own doc comment for why INFO, not DEBUG, matters there specifically)",
+        help="root log level for this whole run (this script's own messages and everything else via "
+        "normal logging hierarchy inheritance, including he6-cres-spec-sims's own package)",
     )
     arg(
         "--log-override",
@@ -241,14 +226,13 @@ def resolve_noise_paths(args: argparse.Namespace) -> list[str]:
 def build_step_fns(args: argparse.Namespace, noise_paths: list[str]) -> dict:
     """Builds the real, complete step_fns dict for this run: everything
     from stage1_steps.STEP_FNS, with its two placeholders (specsims_done,
-    katydid_done -- see that module's own doc comment on why they're
-    placeholders there) replaced by real closures built from this run's own
+    katydid_done) replaced by real closures built from this run's own
     CLI-provided config. Split out from main() for the same reason as
-    compute_skip_steps above. noise_paths is passed in already resolved
-    (see resolve_noise_paths) rather than recomputed here, so both closures
-    below share the exact same resolved value rather than each
-    independently re-resolving it (wasteful, and, for --noise-id, a second
-    DB round-trip that could in principle resolve differently).
+    compute_skip_steps above. noise_paths is passed in already resolved by
+    resolve_noise_paths rather than recomputed here, so both closures below
+    share the exact same resolved value instead of each independently
+    re-resolving it, which for --noise-id would mean a second DB
+    round-trip that could in principle resolve differently.
     """
     step_fns = dict(stage1_steps.STEP_FNS)
     step_fns["specsims_done"] = stage1_steps.make_run_specsims(
