@@ -93,7 +93,7 @@ STEPS: list[str] = [
 ]
 
 
-def task_dir(runs_dir: Path, run_name: str, subrun_id: int, field_index: int) -> Path:
+def task_dir(*, runs_dir: Path, run_name: str, subrun_id: int, field_index: int) -> Path:
     """The one directory holding everything for this stage-1 task: its
     config, its (possibly node-local-only) intermediate .speck/.root/slew
     files, its checkpoint markers, and its final proto+zstd output.
@@ -119,7 +119,7 @@ def parse_task_dir(d: Path) -> tuple[str, int, int]:
     return run_name, subrun_id, field_index
 
 
-def get_state(runs_dir: Path, run_name: str, subrun_id: int, field_index: int) -> str | None:
+def get_state(*, runs_dir: Path, run_name: str, subrun_id: int, field_index: int) -> str | None:
     """Returns the name of the furthest-completed step for this task (per
     STEPS's own order), or None if nothing has been checkpointed yet.
     Derived purely from which marker files exist on disk -- not tracked
@@ -127,7 +127,7 @@ def get_state(runs_dir: Path, run_name: str, subrun_id: int, field_index: int) -
     query) can always determine exactly where a task stands just by looking
     at what's already there.
     """
-    d = task_dir(runs_dir, run_name, subrun_id, field_index)
+    d = task_dir(runs_dir=runs_dir, run_name=run_name, subrun_id=subrun_id, field_index=field_index)
     furthest: str | None = None
     for step in STEPS:
         if is_checkpointed(d, step):
@@ -138,6 +138,7 @@ def get_state(runs_dir: Path, run_name: str, subrun_id: int, field_index: int) -
 
 
 def run_stage1_task(
+    *,
     runs_dir: Path,
     run_name: str,
     subrun_id: int,
@@ -176,9 +177,9 @@ def run_stage1_task(
     and only that action, never runs and never gets checkpointed, while
     every other step proceeds normally.
     """
-    d = task_dir(runs_dir, run_name, subrun_id, field_index)
+    d = task_dir(runs_dir=runs_dir, run_name=run_name, subrun_id=subrun_id, field_index=field_index)
     d.mkdir(parents=True, exist_ok=True)
     for step in STEPS:
         if step in skip_steps:
             continue
-        run_checkpointed(d, step, lambda step=step: step_fns[step](d))
+        run_checkpointed(task_dir=d, step_name=step, fn=lambda step=step: step_fns[step](d))

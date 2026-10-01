@@ -77,7 +77,7 @@ def _chunked_filename(filename: str, chunk: ChunkScope) -> str:
     return f"{stem}_{chunk.job_id_start}-{chunk.job_id_end}.{ext}"
 
 
-def find_task_dirs(runs_dir: Path, run_name: str, chunk: ChunkScope | None = None) -> list[Path]:
+def find_task_dirs(*, runs_dir: Path, run_name: str, chunk: ChunkScope | None = None) -> list[Path]:
     """Every stage-1 task directory for this run (chunk=None), or just the
     task directories for one chunk's job id range (chunk=<a ChunkScope>).
 
@@ -98,7 +98,12 @@ def find_task_dirs(runs_dir: Path, run_name: str, chunk: ChunkScope | None = Non
     if chunk is None:
         return sorted((runs_dir / run_name).glob("subrun_*/field_*"))
     return [
-        task_dir(runs_dir, run_name, *divmod(job_id, chunk.num_fields))
+        task_dir(
+            runs_dir=runs_dir,
+            run_name=run_name,
+            subrun_id=job_id // chunk.num_fields,
+            field_index=job_id % chunk.num_fields,
+        )
         for job_id in range(chunk.job_id_start, chunk.job_id_end + 1)
     ]
 
@@ -147,6 +152,7 @@ def check_all_files_present(task_dirs: list[Path]) -> None:
 
 
 def _merge_one_type(
+    *,
     task_dirs: list[Path],
     filename: str,
     list_message_cls: Callable[[], ListMessage],
@@ -174,25 +180,47 @@ def _merge_one_type(
 
 
 def merge_bands(task_dirs: list[Path]) -> band_pb2.BandLists:
-    return _merge_one_type(task_dirs, BANDS_PROTO_FILENAME, band_pb2.BandList, band_pb2.BandLists, "band_lists")
+    return _merge_one_type(
+        task_dirs=task_dirs,
+        filename=BANDS_PROTO_FILENAME,
+        list_message_cls=band_pb2.BandList,
+        lists_message_cls=band_pb2.BandLists,
+        lists_field_name="band_lists",
+    )
 
 
 def merge_dmtracks(task_dirs: list[Path]) -> dmtrack_pb2.DMTrackLists:
     return _merge_one_type(
-        task_dirs, DMTRACKS_PROTO_FILENAME, dmtrack_pb2.DMTrackList, dmtrack_pb2.DMTrackLists, "dmtrack_lists"
+        task_dirs=task_dirs,
+        filename=DMTRACKS_PROTO_FILENAME,
+        list_message_cls=dmtrack_pb2.DMTrackList,
+        lists_message_cls=dmtrack_pb2.DMTrackLists,
+        lists_field_name="dmtrack_lists",
     )
 
 
 def merge_events(task_dirs: list[Path]) -> event_pb2.EventLists:
-    return _merge_one_type(task_dirs, EVENTS_PROTO_FILENAME, event_pb2.EventList, event_pb2.EventLists, "event_lists")
+    return _merge_one_type(
+        task_dirs=task_dirs,
+        filename=EVENTS_PROTO_FILENAME,
+        list_message_cls=event_pb2.EventList,
+        lists_message_cls=event_pb2.EventLists,
+        lists_field_name="event_lists",
+    )
 
 
 def merge_points(task_dirs: list[Path]) -> point_pb2.PointLists:
-    return _merge_one_type(task_dirs, POINTS_PROTO_FILENAME, point_pb2.PointList, point_pb2.PointLists, "point_lists")
+    return _merge_one_type(
+        task_dirs=task_dirs,
+        filename=POINTS_PROTO_FILENAME,
+        list_message_cls=point_pb2.PointList,
+        lists_message_cls=point_pb2.PointLists,
+        lists_field_name="point_lists",
+    )
 
 
 def run_stage2_merge(
-    runs_dir: Path, run_name: str, allow_missing: bool = False, chunk: ChunkScope | None = None
+    *, runs_dir: Path, run_name: str, allow_missing: bool = False, chunk: ChunkScope | None = None
 ) -> None:
     """The actual stage-2 step: merges bands/dmtracks/events/points and
     writes each to runs_dir/run_name/<same filename as the per-task one>,
@@ -207,7 +235,7 @@ def run_stage2_merge(
     allow_missing changes is whether check_all_files_present runs first
     to rule it out entirely.
     """
-    task_dirs = find_task_dirs(runs_dir, run_name, chunk)
+    task_dirs = find_task_dirs(runs_dir=runs_dir, run_name=run_name, chunk=chunk)
     if not task_dirs:
         raise RuntimeError(f"No stage-1 task directories found under {runs_dir / run_name}/subrun_*/field_*")
     logger.info("stage2 merge: found %d task dir(s) under %s", len(task_dirs), runs_dir / run_name)

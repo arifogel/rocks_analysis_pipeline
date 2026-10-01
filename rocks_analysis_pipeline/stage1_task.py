@@ -236,10 +236,10 @@ def build_step_fns(args: argparse.Namespace, noise_paths: list[str]) -> dict:
     """
     step_fns = dict(stage1_steps.STEP_FNS)
     step_fns["specsims_done"] = stage1_steps.make_run_specsims(
-        args.yaml_config,
-        args.json_config,
-        args.initial_seed,
-        noise_paths,
+        yaml_config=args.yaml_config,
+        json_config=args.json_config,
+        initial_seed=args.initial_seed,
+        noise_paths=noise_paths,
         use_ghcss=args.use_ghcss,
     )
     step_fns["katydid_done"] = stage1_steps.make_run_katydid(args.katydid_config, noise_paths)
@@ -272,11 +272,11 @@ def main() -> None:
         logger.info("skipping (--keep-*) steps: %s", sorted(skip_steps))
 
     run_stage1_task(
-        Path(args.runs_dir),
-        args.run_name,
-        subrun_id,
-        field_index,
-        build_step_fns(args, noise_paths),
+        runs_dir=Path(args.runs_dir),
+        run_name=args.run_name,
+        subrun_id=subrun_id,
+        field_index=field_index,
+        step_fns=build_step_fns(args, noise_paths),
         skip_steps=skip_steps,
     )
     logger.info("stage1_task complete: run_name=%s subrun_id=%s field_index=%s", args.run_name, subrun_id, field_index)

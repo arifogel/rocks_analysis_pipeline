@@ -235,7 +235,12 @@ def _run_one_task(args: argparse.Namespace, job: dict[str, Any]) -> Path:
     task_label = f"subrun {job['subrun_id']} field {job['field_index']}"
     token = _task_ctx.set(task_label)
     try:
-        d = task_dir(Path(args.runs_dir), args.run_name, job["subrun_id"], job["field_index"])
+        d = task_dir(
+            runs_dir=Path(args.runs_dir),
+            run_name=args.run_name,
+            subrun_id=job["subrun_id"],
+            field_index=job["field_index"],
+        )
         d.mkdir(parents=True, exist_ok=True)
         log_path = d / STAGE1_TASK_LOG_FILENAME
 
@@ -293,7 +298,7 @@ def main() -> None:
     logger.info("All %d task(s) completed successfully.", len(jobs))
 
     logger.info("starting stage 2 merge")
-    run_stage2_merge(Path(args.runs_dir), args.run_name)
+    run_stage2_merge(runs_dir=Path(args.runs_dir), run_name=args.run_name)
     logger.info("stage 2 merge complete")
 
 

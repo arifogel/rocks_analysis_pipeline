@@ -90,7 +90,9 @@ def main() -> None:
         if args.chunk_job_id_start is not None
         else None
     )
-    run_stage2_merge(Path(args.runs_dir), args.run_name, allow_missing=args.allow_missing, chunk=chunk)
+    run_stage2_merge(
+        runs_dir=Path(args.runs_dir), run_name=args.run_name, allow_missing=args.allow_missing, chunk=chunk
+    )
 
 
 if __name__ == "__main__":

@@ -197,7 +197,7 @@ def build_job_chunks(num_jobs: int, chunk_size_limit: int) -> list[tuple[int, in
 
 
 def build_map_command(
-    launcher_path: str, runfiles_dir: str, args: argparse.Namespace, num_fields: int, job_id_offset: int
+    *, launcher_path: str, runfiles_dir: str, args: argparse.Namespace, num_fields: int, job_id_offset: int
 ) -> str:
     """Builds the shell command each map task runs.
 
@@ -252,6 +252,7 @@ def build_map_command(
 
 
 def build_reduce_command(
+    *,
     launcher_path: str,
     runfiles_dir: str,
     args: argparse.Namespace,
@@ -283,6 +284,7 @@ def build_reduce_command(
 
 
 def submit_map_chunk(
+    *,
     launcher_path: str,
     runfiles_dir: str,
     args: argparse.Namespace,
@@ -303,7 +305,9 @@ def submit_map_chunk(
     # detailed per-task log still lands at task_dir/stage1_task.log.
     log_path = slurm_log_dir / f"map_chunk{chunk_index}_%A_%a.log"
 
-    cmd = build_map_command(launcher_path, runfiles_dir, args, num_fields, job_id_offset=offset)
+    cmd = build_map_command(
+        launcher_path=launcher_path, runfiles_dir=runfiles_dir, args=args, num_fields=num_fields, job_id_offset=offset
+    )
     proc = sbatch_job(
         cmd=cmd,
         job_name=f"{args.run_name}_map_chunk{chunk_index}",
@@ -315,6 +319,7 @@ def submit_map_chunk(
 
 
 def submit_reduce_chunk(
+    *,
     launcher_path: str,
     runfiles_dir: str,
     args: argparse.Namespace,
@@ -329,7 +334,14 @@ def submit_reduce_chunk(
     slurm_log_dir.mkdir(parents=True, exist_ok=True)
     log_path = slurm_log_dir / f"reduce_chunk{chunk_index}_%j.log"
 
-    cmd = build_reduce_command(launcher_path, runfiles_dir, args, num_fields, offset, chunk_size)
+    cmd = build_reduce_command(
+        launcher_path=launcher_path,
+        runfiles_dir=runfiles_dir,
+        args=args,
+        num_fields=num_fields,
+        offset=offset,
+        chunk_size=chunk_size,
+    )
     proc = sbatch_job(
         cmd=cmd,
         job_name=f"{args.run_name}_reduce_chunk{chunk_index}",
@@ -361,21 +373,49 @@ def main() -> None:
                 chunk_index,
                 chunk_size,
                 offset,
-                build_map_command(launcher_path, runfiles_dir, args, num_fields, job_id_offset=offset),
+                build_map_command(
+                    launcher_path=launcher_path,
+                    runfiles_dir=runfiles_dir,
+                    args=args,
+                    num_fields=num_fields,
+                    job_id_offset=offset,
+                ),
             )
             logger.info(
                 "[dry_run] chunk %d reduce command:\n%s",
                 chunk_index,
-                build_reduce_command(launcher_path, runfiles_dir, args, num_fields, offset, chunk_size),
+                build_reduce_command(
+                    launcher_path=launcher_path,
+                    runfiles_dir=runfiles_dir,
+                    args=args,
+                    num_fields=num_fields,
+                    offset=offset,
+                    chunk_size=chunk_size,
+                ),
             )
         return
 
     for chunk_index, (offset, chunk_size) in enumerate(chunks):
-        map_job_id = submit_map_chunk(launcher_path, runfiles_dir, args, num_fields, chunk_index, offset, chunk_size)
+        map_job_id = submit_map_chunk(
+            launcher_path=launcher_path,
+            runfiles_dir=runfiles_dir,
+            args=args,
+            num_fields=num_fields,
+            chunk_index=chunk_index,
+            offset=offset,
+            chunk_size=chunk_size,
+        )
         logger.info("submitted map chunk %d: job %s (%d tasks)", chunk_index, map_job_id, chunk_size)
 
         reduce_job_id = submit_reduce_chunk(
-            launcher_path, runfiles_dir, args, num_fields, chunk_index, offset, chunk_size, map_job_id
+            launcher_path=launcher_path,
+            runfiles_dir=runfiles_dir,
+            args=args,
+            num_fields=num_fields,
+            chunk_index=chunk_index,
+            offset=offset,
+            chunk_size=chunk_size,
+            map_job_id=map_job_id,
         )
         logger.info(
             "submitted reduce chunk %d: job %s (runs after map chunk %d's job %s completes)",

@@ -27,7 +27,7 @@ class RenderKatydidConfigTest(unittest.TestCase):
             with open(base_path, "w") as f:
                 yaml.dump(base_config, f)
 
-            render_katydid_config(str(base_path), 1.92223, output_path)
+            render_katydid_config(base_config_path=str(base_path), true_field=1.92223, output_path=output_path)
 
             with open(output_path) as f:
                 rendered = yaml.load(f, Loader=yaml.FullLoader)
@@ -47,7 +47,9 @@ class RenderKatydidConfigTest(unittest.TestCase):
                 yaml.dump(base_config, f)
 
             with self.assertRaises(ValueError):
-                render_katydid_config(str(base_path), 1.92223, Path(tmp) / "rendered.yaml")
+                render_katydid_config(
+                    base_config_path=str(base_path), true_field=1.92223, output_path=Path(tmp) / "rendered.yaml"
+                )
 
 
 if __name__ == "__main__":

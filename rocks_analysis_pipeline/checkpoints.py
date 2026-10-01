@@ -39,7 +39,7 @@ def mark_checkpoint(task_dir: Path, step_name: str) -> None:
     tmp_path.rename(path)
 
 
-def run_checkpointed(task_dir: Path, step_name: str, fn) -> None:
+def run_checkpointed(*, task_dir: Path, step_name: str, fn) -> None:
     """Runs fn() and marks step_name checkpointed, unless step_name is
     already checkpointed for this task, in which case fn() is skipped
     entirely. This is what makes a task resumable: re-running it after a

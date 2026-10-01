@@ -74,7 +74,7 @@ MB_EVENTS_TREE_NAME = "MB-events"
 KATYDID_TRACKS_TREE_NAME = "tracks"
 
 
-def _compress_log(task_dir: Path, log_filename: str, compressed_filename: str) -> None:
+def _compress_log(*, task_dir: Path, log_filename: str, compressed_filename: str) -> None:
     """Compresses task_dir/log_filename to task_dir/compressed_filename,
     leaving the original in place.
 
@@ -111,7 +111,9 @@ def _delete_uncompressed_log(task_dir: Path, log_filename: str) -> None:
 
 
 def compress_specsims_log(task_dir: Path) -> None:
-    _compress_log(task_dir, SPECSIMS_LOG_FILENAME, COMPRESSED_SPECSIMS_LOG_FILENAME)
+    _compress_log(
+        task_dir=task_dir, log_filename=SPECSIMS_LOG_FILENAME, compressed_filename=COMPRESSED_SPECSIMS_LOG_FILENAME
+    )
 
 
 def delete_uncompressed_specsims_log(task_dir: Path) -> None:
@@ -119,7 +121,9 @@ def delete_uncompressed_specsims_log(task_dir: Path) -> None:
 
 
 def compress_katydid_log(task_dir: Path) -> None:
-    _compress_log(task_dir, KATYDID_LOG_FILENAME, COMPRESSED_KATYDID_LOG_FILENAME)
+    _compress_log(
+        task_dir=task_dir, log_filename=KATYDID_LOG_FILENAME, compressed_filename=COMPRESSED_KATYDID_LOG_FILENAME
+    )
 
 
 def delete_uncompressed_katydid_log(task_dir: Path) -> None:
@@ -223,7 +227,7 @@ def get_slope(true_field: float, frequency: float = 19.15e9) -> float:
 KATYDID_SET_FIELD_PROCESSOR_TYPES = frozenset({"multi-band-event-builder"})
 
 
-def render_katydid_config(base_config_path: str, true_field: float, output_path: Path) -> None:
+def render_katydid_config(*, base_config_path: str, true_field: float, output_path: Path) -> None:
     """Writes a copy of base_config_path with every KATYDID_SET_FIELD_PROCESSOR_TYPES processor
     instance's set-field set to true_field."""
     with open(base_config_path) as f:
@@ -244,7 +248,9 @@ def render_katydid_config(base_config_path: str, true_field: float, output_path:
         yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False)
 
 
-def render_specsims_config(task_dir: Path, yaml_config: str, json_config: str, initial_seed: int, noise_paths: list[str]) -> Path:
+def render_specsims_config(
+    *, task_dir: Path, yaml_config: str, json_config: str, initial_seed: int, noise_paths: list[str]
+) -> Path:
     """Renders this one task's specsims.yaml for exactly one (subrun, field) pair, since a
     stage-1 task is exactly one such pair. seed = initial_seed + subrun_id. Returns the path it
     wrote to.
@@ -285,6 +291,7 @@ def render_specsims_config(task_dir: Path, yaml_config: str, json_config: str, i
 
 
 def make_run_specsims(
+    *,
     yaml_config: str,
     json_config: str,
     initial_seed: int,
@@ -325,7 +332,13 @@ def make_run_specsims(
     """
 
     def fn(task_dir: Path) -> None:
-        config_path = render_specsims_config(task_dir, yaml_config, json_config, initial_seed, noise_paths)
+        config_path = render_specsims_config(
+            task_dir=task_dir,
+            yaml_config=yaml_config,
+            json_config=json_config,
+            initial_seed=initial_seed,
+            noise_paths=noise_paths,
+        )
         log_path = task_dir / SPECSIMS_LOG_FILENAME
         logger.info("specsims starting (use_ghcss=%s), own log -> %s", use_ghcss, log_path)
 
@@ -409,7 +422,9 @@ def delete_specsims_output(task_dir: Path) -> None:
     logger.info("specsims_output_deleted: spec_files/ (specsims/ dir also removed: %s)", dir_removed)
 
 
-def build_katydid_command_for_task(task_dir: Path, katydid_path: str, katydid_config: str, noise_paths: list[str]) -> list[str]:
+def build_katydid_command_for_task(
+    *, task_dir: Path, katydid_path: str, katydid_config: str, noise_paths: list[str]
+) -> list[str]:
     """Builds the Katydid command line for this task: renders a copy of katydid_config with
     set-field set to this task's true_field, then builds the full command against the two
     .speck files this task's specsims run produced.
@@ -418,7 +433,9 @@ def build_katydid_command_for_task(task_dir: Path, katydid_path: str, katydid_co
     true_field = identity.true_field
 
     rendered_katydid_config_path = task_dir / "katydid_config.yaml"
-    render_katydid_config(katydid_config, true_field, rendered_katydid_config_path)
+    render_katydid_config(
+        base_config_path=katydid_config, true_field=true_field, output_path=rendered_katydid_config_path
+    )
 
     spec_files_dir = task_dir / SPECSIMS_OUTPUT_DIRNAME / "spec_files"
     speck_paths = sorted(spec_files_dir.glob("*.speck"))
@@ -472,7 +489,9 @@ def make_run_katydid(katydid_config: str, noise_paths: list[str]) -> Callable[[P
 
     def fn(task_dir: Path) -> None:
         katydid_path = resolve_katydid_path()
-        command = build_katydid_command_for_task(task_dir, katydid_path, katydid_config, noise_paths)
+        command = build_katydid_command_for_task(
+            task_dir=task_dir, katydid_path=katydid_path, katydid_config=katydid_config, noise_paths=noise_paths
+        )
         log_path = task_dir / KATYDID_LOG_FILENAME
         logger.info("katydid starting, own log -> %s", log_path)
         with open(log_path, "w", buffering=1) as log_file:
