@@ -1,22 +1,21 @@
 #!/usr/bin/env python3
 """
-Thin CLI driver for stage 2's own merge step (see stage2_merge.py's own
-module doc comment for the real logic and reasoning) -- exists as its own,
-separate entry point for the wulf case: stage 1 orchestrated separately
-from local_ssa (see local_ssa.py's own module doc comment on why), needing
-stage 2 run as its own, standalone step against whatever stage-1 output
-already exists on disk, rather than only ever in-process from local_ssa's
-own main().
+Thin CLI driver for stage 2's merge step (see stage2_merge.py's module doc
+comment for the real logic and reasoning) -- a separate entry point for
+the wulf case: stage 1 is orchestrated separately from local_ssa (see
+local_ssa.py's module doc comment on why), needing stage 2 run as a
+standalone step against whatever stage-1 output already exists on disk,
+rather than only ever in-process from local_ssa's main().
 
-Flags match local_ssa.py's own --runs-dir/--run-name exactly, for the same
-reason local_ssa.py's own flags match stage1_task.py's -- a value copied
-from one CLI's own --help works unchanged on the other.
+Flags match local_ssa.py's --runs-dir/--run-name exactly, for the same
+reason local_ssa.py's flags match stage1_task.py's -- a value copied from
+one CLI's --help works unchanged on the other.
 
 The --chunk-* flags are all-or-nothing: given together, they scope the
-merge to one chunk's own job id range and suffix its output filenames --
-see stage2_merge.py's own ChunkScope doc comment. wulf_ssa.py's per-chunk
-reduce job is the only caller that passes them; omitted (the default),
-this merges every task directory the run has, unsuffixed.
+merge to one chunk's job id range and suffix its output filenames -- see
+stage2_merge.py's ChunkScope doc comment. wulf_ssa.py's per-chunk reduce
+job is the only caller that passes them; omitted (the default), this
+merges every task directory the run has, unsuffixed.
 
 Example:
     bazel run --@pypi//venv=dev //:stage2_merge_task -- \\
@@ -40,8 +39,8 @@ def parse_args() -> argparse.Namespace:
     par = argparse.ArgumentParser()
     arg = par.add_argument
 
-    arg("--runs-dir", type=str, required=True, help="base runs directory, matching local_ssa.py's own --runs-dir")
-    arg("--run-name", type=str, required=True, help="run name, matching local_ssa.py's own --run-name")
+    arg("--runs-dir", type=str, required=True, help="base runs directory, matching local_ssa.py's --runs-dir")
+    arg("--run-name", type=str, required=True, help="run name, matching local_ssa.py's --run-name")
     arg(
         "--allow-missing",
         action="store_true",
@@ -68,7 +67,7 @@ def parse_args() -> argparse.Namespace:
         "--chunk-num-fields",
         type=int,
         default=None,
-        help="Fields per subrun for this run, same value as stage1_task.py's own --num-fields. "
+        help="Fields per subrun for this run, same value as stage1_task.py's --num-fields. "
         "Needed to work out which subrun and field a job id belongs to. Must be given together "
         "with --chunk-job-id-start and --chunk-job-id-end.",
     )

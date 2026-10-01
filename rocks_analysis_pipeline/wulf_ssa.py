@@ -5,12 +5,12 @@ local_ssa.py's direct sibling, submitting Slurm jobs instead of running
 local subprocesses.
 
 Map: every (subrun, field) simulation+analysis task for a run, run in
-parallel on wulf's own compute nodes, chunked into one or more Slurm job
+parallel on wulf's compute nodes, chunked into one or more Slurm job
 arrays (see --chunk-size). Reduce: one job per chunk, each dependent only
-on its own chunk's map tasks finishing (not necessarily succeeding -- see
---allow-missing), merging that chunk's own outputs into one of this run's
+on that chunk's map tasks finishing (not necessarily succeeding -- see
+--allow-missing), merging that chunk's outputs into one of this run's
 per-chunk results -- never more than one chunk's worth of tasks in memory
-at once, bounding a reduce job's own memory footprint regardless of how
+at once, bounding a reduce job's memory footprint regardless of how
 large the run is.
 
 Input: a run name, a base specsims yaml/json config, a katydid config,
@@ -19,37 +19,36 @@ full set.
 
 Output: four files per chunk under runs_dir/run_name/ -- bands_<a>-<b>.pb.zst,
 dmtracks_<a>-<b>.pb.zst, events_<a>-<b>.pb.zst, points_<a>-<b>.pb.zst, <a>-<b>
-that chunk's own inclusive job id range -- see stage2_merge.py's own
+that chunk's inclusive job id range -- see stage2_merge.py's
 ChunkScope/_chunked_filename doc comments. The
 unsuffixed bands.pb.zst/etc. local_ssa.py itself produces is a single-chunk
 special case of the same four files, not something this script also writes.
 
 Side effects: one map sbatch invocation per chunk, each immediately followed by that
-chunk's own reduce sbatch invocation. Map: every (subrun, field) pair, one Slurm task
+chunk's reduce sbatch invocation. Map: every (subrun, field) pair, one Slurm task
 each, submitted as one or more Slurm job arrays -- chunked at --chunk-size tasks per
 array, since a single array job can only hold as many tasks as the cluster's MaxArraySize
-allows (see --chunk-size's help for how to find that limit). Each task writes its own log
+allows (see --chunk-size's help for how to find that limit). Each task writes a log
 under runs_dir/run_name/subrun_*/field_*/, matching where a locally-run task would.
 Reduce: one single, non-array job per chunk, submitted with
---dependency=afterany:<that chunk's own map array id> -- Slurm starts it once every task
+--dependency=afterany:<that chunk's map array id> -- Slurm starts it once every task
 in that chunk has finished, whether or not each one succeeded (afterok would instead
 block this job forever the moment any single array task fails, defeating
-stage2_merge_task's --allow-missing). Every job's own sbatch stdout/stderr capture (a
-fallback for whatever each doesn't already log itself, e.g. a crash before its own
+stage2_merge_task's --allow-missing). Every job's sbatch stdout/stderr capture (a
+fallback for whatever each doesn't already log itself, e.g. a crash before
 logging starts) goes under runs_dir/run_name/slurm_logs/.
 
-Execution environment: run this script on cenpa-wulf's own head node; it
-does no simulation, analysis, or merge work itself, only submits jobs
-that do.
+Execution environment: run this script on cenpa-wulf's head node; it does
+no simulation, analysis, or merge work itself, only submits jobs that do.
 
 Each map task gets a single flat $SLURM_ARRAY_TASK_ID from Slurm,
-translated into (subrun_id, field_index) via stage1_task.py's own
+translated into (subrun_id, field_index) via stage1_task.py's
 --job-id/--num-fields. The reduce job runs stage2_merge_task.py. (This
-project's own vocabulary for these two phases, used throughout the rest
-of the codebase -- e.g. stage1_task.py, stage2_merge.py -- is "stage
+project's vocabulary for these two phases, used throughout the rest of
+the codebase -- e.g. stage1_task.py, stage2_merge.py -- is "stage
 1"/"stage 2", should further reading lead there.)
 
-Run this script with --help for its own full flag reference.
+Run this script with --help for a full flag reference.
 """
 
 import argparse
@@ -71,18 +70,18 @@ def parse_args() -> argparse.Namespace:
     arg = par.add_argument
 
     arg("--run-name", type=str, required=True, help="run name")
-    arg("--runs-dir", type=str, required=True, help="base output directory for runs, matching stage1_task.py's own --runs-dir")
-    arg("--yaml-config", type=str, required=True, help="base specsims yaml config, matching stage1_task.py's own --yaml-config")
+    arg("--runs-dir", type=str, required=True, help="base output directory for runs, matching stage1_task.py's --runs-dir")
+    arg("--yaml-config", type=str, required=True, help="base specsims yaml config, matching stage1_task.py's --yaml-config")
     arg(
         "--json-config",
         type=str,
         required=True,
-        help="base specsims json config (fields_T/traps_A/etc.), matching stage1_task.py's own "
+        help="base specsims json config (fields_T/traps_A/etc.), matching stage1_task.py's "
         "--json-config -- also where this driver reads len(fields_T) from, to enumerate "
         "field_index values",
     )
     arg("--num-subruns", type=int, required=True, help="number of subruns, 0..num-subruns-1")
-    arg("--initial-seed", type=int, default=0, help="seed for subrun_id=0, matching stage1_task.py's own --initial-seed")
+    arg("--initial-seed", type=int, default=0, help="seed for subrun_id=0, matching stage1_task.py's --initial-seed")
     arg("--katydid-config", type=str, required=True, help="full path to the base katydid yaml config file")
 
     noise_group = par.add_mutually_exclusive_group(required=True)
@@ -98,8 +97,8 @@ def parse_args() -> argparse.Namespace:
     arg("--use-ghcss", action="store_true", help="pass --use-ghcss through to every simulation+analysis task")
 
     # Job-control surface matches sbatch_ssa_katydid.py/sbatch_spec_sims.py/
-    # sbatch_ssa_post_processing.py's own union exactly: --tlim is the only
-    # job-control flag any of them expose, each with its own default rather
+    # sbatch_ssa_post_processing.py's union exactly: --tlim is the only
+    # job-control flag any of them expose, each with its default rather
     # than requiring it. cpus-per-task/mem/concurrency limits have no
     # precedent in any of them and aren't included here either.
     arg(
@@ -120,8 +119,8 @@ def parse_args() -> argparse.Namespace:
         "above by the cluster's MaxArraySize (`scontrol show config | grep MaxArraySize`), since a "
         "chunk's map tasks are submitted as a single array job; default is comfortably under "
         "Slurm's stock 1001 default -- lower this if this cluster's MaxArraySize is smaller. Also "
-        "bounds each reduce job's own memory footprint, since it only ever merges one chunk's "
-        "worth of tasks at a time (see this module's own doc comment)",
+        "bounds each reduce job's memory footprint, since it only ever merges one chunk's "
+        "worth of tasks at a time (see this module's doc comment)",
     )
 
     arg("--allow-missing", action="store_true", help="pass --allow-missing through to the merge job")
@@ -134,7 +133,7 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         help="comma-separated logger_name=LEVEL overrides -- see logging_setup.init_logging. Passed "
-        "through to both submitted jobs' own --log-override too.",
+        "through to both submitted jobs' --log-override too.",
     )
 
     arg("--keep-uncompressed-specsims-log", dest="keep_uncompressed_specsims_log", action="store_true")
@@ -148,7 +147,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def resolve_launcher_path() -> str:
-    """Resolves tools/run_via_warmed_runfiles.sh's own real path via bazel
+    """Resolves tools/run_via_warmed_runfiles.sh's real path via bazel
     runfiles.
     """
     r = runfiles.Create()
@@ -168,9 +167,9 @@ def resolve_runfiles_dir(launcher_path: str) -> str:
 
 def build_jobs_and_num_fields(args: argparse.Namespace) -> tuple[list[dict[str, Any]], int]:
     """Enumerates every (subrun_id, field_index) task for this run, and
-    returns num_fields alongside it: stage1_task.py's own --job-id/
+    returns num_fields alongside it: stage1_task.py's --job-id/
     --num-fields derivation (job_id // num_fields, job_id % num_fields)
-    needs the same num_fields value this enumeration itself used, for
+    needs the same num_fields value this enumeration used, for
     $SLURM_ARRAY_TASK_ID to map back to the same (subrun_id, field_index)
     pairs in the same order.
     """
@@ -194,7 +193,7 @@ def build_job_chunks(num_jobs: int, chunk_size_limit: int) -> list[tuple[int, in
     offset..offset+chunk_size-1, submitted as that chunk's array job with local indices
     0..chunk_size-1. offset is each chunk's global starting position, to be reapplied wherever
     a chunk's local $SLURM_ARRAY_TASK_ID needs mapping back to its real, global task id, and
-    wherever its reduce job needs mapping back to its own job id range.
+    wherever its reduce job needs mapping back to its job id range.
     """
     chunks: list[tuple[int, int]] = []
     offset = 0
@@ -269,8 +268,8 @@ def build_reduce_command(
     chunk_size: int,
 ) -> str:
     """Builds the shell command one chunk's reduce job runs -- the
-    --chunk-* flags scope it to this chunk's own, inclusive job id range
-    and filename suffix (see stage2_merge_task.py's own --help).
+    --chunk-* flags scope it to this chunk's inclusive job id range and
+    filename suffix (see stage2_merge_task.py's --help).
     """
     parts = [
         f"RUNFILES_DIR={shlex.quote(runfiles_dir)}",
@@ -305,11 +304,11 @@ def submit_map_chunk(
     """
     slurm_log_dir = Path(args.runs_dir) / args.run_name / "slurm_logs"
     slurm_log_dir.mkdir(parents=True, exist_ok=True)
-    # %A/%a: Slurm's own array-job/array-task-id placeholders, substituted by
-    # Slurm itself per task. This is sbatch's own stdout/stderr capture, a
+    # %A/%a: Slurm's array-job/array-task-id placeholders, substituted by
+    # Slurm itself per task. This is sbatch's stdout/stderr capture, a
     # fallback for whatever stage1_task itself doesn't already log (e.g. a
-    # crash before its own init_logging even runs) -- stage1_task.py's own,
-    # more detailed per-task log still lands at task_dir/stage1_task.log as
+    # crash before its init_logging even runs) -- stage1_task.py's more
+    # detailed per-task log still lands at task_dir/stage1_task.log as
     # usual.
     log_path = slurm_log_dir / f"map_chunk{chunk_index}_%A_%a.log"
 
@@ -334,7 +333,7 @@ def submit_reduce_chunk(
     chunk_size: int,
     map_job_id: str,
 ) -> str:
-    """Submits one chunk's reduce job, with --dependency=afterany:<that chunk's own map job id>."""
+    """Submits one chunk's reduce job, with --dependency=afterany:<that chunk's map job id>."""
     slurm_log_dir = Path(args.runs_dir) / args.run_name / "slurm_logs"
     slurm_log_dir.mkdir(parents=True, exist_ok=True)
     log_path = slurm_log_dir / f"reduce_chunk{chunk_index}_%j.log"
