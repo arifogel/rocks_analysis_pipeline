@@ -1,36 +1,32 @@
 #!/usr/bin/env python3
 """
-Local, parallel post-processing driver, replacing sbatch_ssa_post_processing.py
-/ run_ssa_post_processing.py.
+Local, parallel post-processing driver for the ssa pipeline.
 
-Produces the same three outputs (tracks.csv, bands.csv, dmtracks.csv), by
-locating whatever local_spec_sims.py and local_ssa_katydid.py actually wrote
-to disk, rather than reading the rid_df_*.csv files the original SLURM
-pipeline produced (local_ssa_katydid.py doesn't write those).
+Produces three outputs (tracks.csv, bands.csv, dmtracks.csv) by locating
+whatever local_spec_sims.py and local_ssa_katydid.py actually wrote to
+disk, not by reading a separate manifest.
 
     tracks.csv     -- from katydid's .root files (local_ssa_katydid.py's
                        output). Reuses local_ssa_katydid.build_file_df() to
-                       compute the same root_file_path values that script
-                       used to run katydid, rather than re-deriving the path
-                       convention independently -- so this always matches
-                       whatever local_ssa_katydid.py actually produced, even
-                       if its own path convention changes later.
+                       compute the same root_file_path values used to run
+                       katydid, rather than re-deriving the path convention
+                       independently -- so this always matches whatever
+                       local_ssa_katydid.py actually produced, even if its
+                       path convention changes later.
     bands.csv,
     dmtracks.csv   -- MC-truth data from the spec-sims .csv files
-                       local_spec_sims.py writes into each subrun/field's own
-                       output directory (matching Results.save()'s own path
+                       local_spec_sims.py writes into each subrun/field's
+                       output directory (matching Results.save()'s path
                        computation: config_path.parent / config_path.stem --
-                       identical to local_spec_sims.py's own `output_dir`).
+                       identical to local_spec_sims.py's `output_dir`).
 
 Row order does not matter for any of these three outputs: every row is
 self-identifying via explicit columns (run_name/subrun_id/field_index/
 acquisition/true_field for tracks.csv, root_file_path -- here meaning the
-source bands.csv/dmtracks.csv path, matching the original script's own
-column semantics -- for the other two), not by position. This is a
-statement about this pipeline's own outputs, not about whatever downstream
-tool consumes them -- confirm your own tool doesn't assume a specific row
-order before relying on this. Because order genuinely doesn't matter here,
---max-jobs parallelizes the (slower) katydid ROOT-file-reading step.
+source bands.csv/dmtracks.csv path -- for the other two), not by position.
+A downstream consumer of these files must not assume a specific row
+order. Because order genuinely doesn't matter here, --max-jobs
+parallelizes the (slower) katydid ROOT-file-reading step.
 
 Example:
     bazel run --@pypi//venv=dev //:local_ssa_post_processing -- \\
@@ -57,9 +53,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-# Reuses local_ssa_katydid.py's own file-discovery logic directly (see
-# BUILD.bazel: this target includes local_ssa_katydid.py in its own srcs,
-# the same pattern local_spec_sims.py already uses for run_spec_sims.py),
+# Reuses local_ssa_katydid.py's file-discovery logic directly (see
+# BUILD.bazel: this target includes local_ssa_katydid.py in its srcs),
 # rather than re-deriving its path convention independently.
 from rocks_analysis_pipeline.local_ssa_katydid import build_file_df
 
@@ -122,13 +117,13 @@ def flat(jaggedarray) -> np.ndarray:
 
 def build_tracks_for_one_root_file(row: dict) -> pd.DataFrame:
     """Reads a single .root file's MultiBandEvent/fTracks branch into a
-    DataFrame, tagged with this row's identifying columns. Adapted from
-    run_ssa_post_processing.py's build_bulk_track_params_for_single_file:
-    same branch path, same "AsObjects" skip, same flattening -- but tagged
-    with local_ssa_katydid.py's own identifying columns (subrun_id,
-    field_index, acquisition, true_field) rather than the old pipeline's
-    file_id, which has no equivalent here. This is a top-level function
-    (not a closure) so it can be pickled and sent to a worker process.
+    DataFrame, tagged with this row's identifying columns (subrun_id,
+    field_index, acquisition, true_field) rather than a file_id, since
+    there's no file_id equivalent here. Skips any branch whose
+    interpretation is "AsObjects" (triggers an "arbitrary pointer" error),
+    and flattens every other branch's jagged array into one row per
+    element. This is a top-level function (not a closure) so it can be
+    pickled and sent to a worker process.
     """
     import uproot  # imported inside the worker, not the parent process
 
@@ -157,8 +152,7 @@ def build_tracks_csv(file_df: pd.DataFrame, max_jobs: int | None) -> pd.DataFram
     """Reads every existing .root file's tracks in parallel (safe: each
     resulting DataFrame is self-identifying via explicit columns, so
     concatenation order -- which as_completed() does not guarantee --
-    doesn't matter). Missing .root files are skipped, matching the original
-    script's root_file_exists filter.
+    doesn't matter). Missing .root files are skipped rather than erroring.
     """
     rows = [row for row in file_df.to_dict("records") if Path(row["root_file_path"]).is_file()]
     n_missing = len(file_df) - len(rows)
@@ -184,8 +178,8 @@ def build_tracks_csv(file_df: pd.DataFrame, max_jobs: int | None) -> pd.DataFram
 
 
 def find_mc_truth_csvs(runs_base_dir: str, run_name: str, filename: str) -> list[str]:
-    """Matches Results.save()'s own path computation (config_path.parent /
-    config_path.stem), which is identical to local_spec_sims.py's own
+    """Matches Results.save()'s path computation (config_path.parent /
+    config_path.stem), which is identical to local_spec_sims.py's
     per-(subrun, field) output_dir -- so this glob finds exactly what that
     script wrote, at runs_base_dir/run_name/subrun_*/*/{filename}.
     """
@@ -194,11 +188,10 @@ def find_mc_truth_csvs(runs_base_dir: str, run_name: str, filename: str) -> list
 
 
 def build_mc_truth_csv(csv_paths: list[str]) -> pd.DataFrame:
-    """Reused, near-verbatim, from run_ssa_post_processing.py's
-    write_mc_truth_csvs: same "root_file_path" column name for the *source
-    csv's own path* (not a katydid .root file -- matching the original
-    script's column semantics exactly, for drop-in compatibility with
-    anything already relying on that name)."""
+    """Concatenates every csv_path's rows into one DataFrame, tagging each
+    row with its source csv's path under the "root_file_path" column name
+    (not a katydid .root file -- the name is kept for compatibility with
+    anything already relying on it)."""
     dfs: list[pd.DataFrame] = []
     for csv_path in csv_paths:
         df = pd.read_csv(csv_path)
@@ -215,8 +208,8 @@ def main() -> None:
     katydid_dir = str(Path(args.katydid_output_dir) / args.run_name / f"aid_{args.analysis_id}")
 
     # build_file_df() takes args.run_name/.runs_base_dir/.num_subruns directly --
-    # our own arg names were chosen to match local_ssa_katydid.py's exactly for
-    # this reason, so args itself can be passed straight through.
+    # this file's arg names were chosen to match local_ssa_katydid.py's exactly
+    # for this reason, so args itself can be passed straight through.
     file_df = build_file_df(args, katydid_dir)
     if file_df.empty:
         print(f"No .speck files found under {args.runs_base_dir}/{args.run_name}/subrun_*/*/spec_files/*.speck")

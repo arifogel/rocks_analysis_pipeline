@@ -3,41 +3,41 @@
 Local, parallel orchestration driver for this project's ssa (spec-sims and
 analysis) pipeline: fans out stage1_task across every (subrun_id,
 field_index) task for a run via a ThreadPoolExecutor, then, once every
-task has completed successfully, merges that run's own bands/dmtracks/
+task has completed successfully, merges that run's bands/dmtracks/
 events/points into runs_dir/run_name/{bands,dmtracks,events,points}.pb.zst
 by calling stage2_merge.run_stage2_merge directly in-process.
 
-Crash isolation comes from stage1_task running as its own fresh
-subprocess, once per task, not from this orchestrator's own worker being a
-separate process: a hard crash (segfault, OOM-kill) inside one task's
-Simulation.run_full() or Katydid invocation only ever kills that task's
-own subprocess. A ThreadPoolExecutor is the right tool given that: each
-worker thread mostly just waits on a subprocess, so it's I/O-bound rather
-than CPU-bound in this process.
+Crash isolation comes from stage1_task running as a fresh subprocess, once
+per task, not from this orchestrator's worker being a separate process: a
+hard crash (segfault, OOM-kill) inside one task's Simulation.run_full() or
+Katydid invocation only ever kills that task's subprocess. A
+ThreadPoolExecutor is the right tool given that: each worker thread mostly
+just waits on a subprocess, so it's I/O-bound rather than CPU-bound in
+this process.
 
-Each task's subprocess is this process's own sys.executable running `-m
+Each task's subprocess is this process's sys.executable running `-m
 rocks_analysis_pipeline.stage1_task`, which needs no resolved file path --
-Python's own import machinery finds the module directly. This process's
-venv already carries every package stage1_task itself needs (numpy,
-uproot, he6-cres-spec-sims, etc.), so no separate venv or warm-up step is
-needed anywhere: there is only ever the one venv, set up once by bazel's
-own launcher before any tasks run.
+Python's import machinery finds the module directly. This process's venv
+already carries every package stage1_task needs (numpy, uproot,
+he6-cres-spec-sims, etc.), so no separate venv or warm-up step is needed
+anywhere: there is only ever the one venv, set up once by bazel's launcher
+before any tasks run.
 
 Because multiple worker threads share this one process's root logger, each
-log record is tagged with which task its own thread is currently on, via a
-contextvars.ContextVar and a logging.Filter, so concurrent tasks' own
+log record is tagged with which task its thread is currently on, via a
+contextvars.ContextVar and a logging.Filter, so concurrent tasks'
 "starting"/"finished" messages stay distinguishable on this orchestrator's
-own shared console. This is this orchestrator's own, brief per-task status
-only; stage1_task's own full per-task detail (the katydid command, row
-counts, etc.) goes to its own stage1_task.log, written by stage1_task's
-own main() every time it runs as a fresh subprocess.
+shared console. This is this orchestrator's brief per-task status only;
+stage1_task's full per-task detail (the katydid command, row counts, etc.)
+goes to stage1_task.log, written by stage1_task's main() every time it
+runs as a fresh subprocess.
 
-Flags are kebab-case, matching stage1_task's own convention. For every
-flag this shares a concept with (--runs-dir, --run-name, --yaml-config,
+Flags are kebab-case, matching stage1_task's convention. For every flag
+this shares a concept with (--runs-dir, --run-name, --yaml-config,
 --json-config, --initial-seed, --katydid-config, --noise-id/--noise-paths,
 --use-ghcss, --log-level, --log-override, every --keep-<x>), the name here
-is identical to stage1_task's own, not just similarly named, so a value
-copied from one CLI's own --help works unchanged on the other.
+is identical to stage1_task's, not just similarly named, so a value
+copied from one CLI's --help works unchanged on the other.
 
 Example:
     bazel run --@pypi//venv=dev //:local_ssa -- \\
@@ -70,8 +70,8 @@ from rocks_analysis_pipeline.stage2_merge import run_stage2_merge
 
 logger = logging.getLogger(__name__)
 
-# stage1_task's own per-task log, written by stage1_task's own main()
-# every time it runs as a fresh process. Named analogously to
+# stage1_task's per-task log, written by stage1_task's main() every time
+# it runs as a fresh process. Named analogously to
 # stage1_steps.SPECSIMS_LOG_FILENAME/KATYDID_LOG_FILENAME, which live
 # alongside it in the same task_dir.
 STAGE1_TASK_LOG_FILENAME = "stage1_task.log"
@@ -96,7 +96,7 @@ _task_ctx: contextvars.ContextVar[str] = contextvars.ContextVar("task_ctx", defa
 
 
 class _TaskContextFilter(logging.Filter):
-    """Attaches the current thread's own task label to every LogRecord."""
+    """Attaches the current thread's task label to every LogRecord."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         record.task = _task_ctx.get()
@@ -107,25 +107,30 @@ def parse_args() -> argparse.Namespace:
     par = argparse.ArgumentParser()
     arg = par.add_argument
 
-    # Kebab-case throughout, no short aliases, matching stage1_task's own
+    # Kebab-case throughout, no short aliases, matching stage1_task's
     # style: both CLIs use the identical flag name for every shared
     # concept.
     arg("--run-name", type=str, required=True, help="run name")
-    arg("--runs-dir", type=str, required=True, help="base output directory for runs, matching stage1_task's own --runs-dir")
-    arg("--yaml-config", type=str, required=True, help="base specsims yaml config, matching stage1_task's own --yaml-config")
+    arg("--runs-dir", type=str, required=True, help="base output directory for runs, matching stage1_task's --runs-dir")
+    arg(
+        "--yaml-config",
+        type=str,
+        required=True,
+        help="base specsims yaml config, matching stage1_task's --yaml-config",
+    )
     arg(
         "--json-config",
         type=str,
         required=True,
-        help="base specsims json config (fields_T/traps_A/etc.), matching stage1_task's own "
+        help="base specsims json config (fields_T/traps_A/etc.), matching stage1_task's "
         "--json-config -- also where this driver reads len(fields_T) from, to enumerate "
         "field_index values",
     )
     arg("--num-subruns", type=int, required=True, help="number of subruns, 0..num-subruns-1")
-    arg("--initial-seed", type=int, default=0, help="seed for subrun_id=0, matching stage1_task's own --initial-seed")
+    arg("--initial-seed", type=int, default=0, help="seed for subrun_id=0, matching stage1_task's --initial-seed")
     arg("--katydid-config", type=str, required=True, help="full path to the base katydid yaml config file")
 
-    # Exactly one of --noise-id/--noise-paths, matching stage1_task's own
+    # Exactly one of --noise-id/--noise-paths, matching stage1_task's
     # mutually exclusive group exactly, passed through unchanged to every
     # task.
     noise_group = par.add_mutually_exclusive_group(required=True)
@@ -154,7 +159,7 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         help="comma-separated logger_name=LEVEL overrides -- see logging_setup.init_logging. Passed "
-        "through to every task's own --log-override too.",
+        "through to every task's --log-override too.",
     )
 
     # One flag per stage1_task.py --keep-<x> flag, passed straight through
@@ -173,7 +178,7 @@ def build_jobs(args: argparse.Namespace) -> list[dict[str, Any]]:
     """Enumerates every (subrun_id, field_index) task for this run.
 
     No upfront config generation is needed to discover field_index values,
-    since stage1_task's own make_run_specsims renders each task's own
+    since stage1_task's make_run_specsims renders each task's
     specsims.yaml itself, inside the task -- just len(fields_T) from
     json_config, read once here.
     """
@@ -189,7 +194,7 @@ def build_jobs(args: argparse.Namespace) -> list[dict[str, Any]]:
 
 
 def build_task_command(args: argparse.Namespace, job: dict[str, Any]) -> list[str]:
-    """Builds the stage1_task command line for one task: this process's own
+    """Builds the stage1_task command line for one task: this process's
     sys.executable running `-m rocks_analysis_pipeline.stage1_task`. Split
     out from _run_one_task so this half -- the part with real, checkable
     logic -- is directly testable without actually invoking anything.
@@ -228,9 +233,9 @@ def build_task_command(args: argparse.Namespace, job: dict[str, Any]) -> list[st
 
 
 def _run_one_task(args: argparse.Namespace, job: dict[str, Any]) -> Path:
-    """Runs a single (subrun, field) task as its own fresh subprocess, for
-    crash isolation. Returns the task's own log path, for the caller's own
-    completion message.
+    """Runs a single (subrun, field) task as a fresh subprocess, for crash
+    isolation. Returns the task's log path, for the caller's completion
+    message.
     """
     task_label = f"subrun {job['subrun_id']} field {job['field_index']}"
     token = _task_ctx.set(task_label)
@@ -262,7 +267,7 @@ def main() -> None:
     init_logging(args.log_level, args.log_override)
 
     # Attach the per-task context filter to every handler init_logging just
-    # configured (its own basicConfig call), and extend their format to
+    # configured (its basicConfig call), and extend their format to
     # include the injected task label -- see _TaskContextFilter above.
     task_filter = _TaskContextFilter()
     for handler in logging.getLogger().handlers:
