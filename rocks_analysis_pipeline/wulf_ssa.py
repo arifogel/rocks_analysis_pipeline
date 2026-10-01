@@ -49,6 +49,7 @@ import argparse
 import json
 import logging
 import shlex
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -176,22 +177,31 @@ def build_jobs_and_num_fields(args: argparse.Namespace) -> tuple[list[dict[str, 
     return jobs, num_fields
 
 
-def build_job_chunks(num_jobs: int, chunk_size_limit: int) -> list[tuple[int, int]]:
-    """Splits the full, global 0..num_jobs-1 task-id range into consecutive chunks of at most
-    chunk_size_limit each, one per Slurm job array -- see --chunk-size's help for why a
-    single array can't just hold all of num_jobs.
-
-    Returns a list of (offset, chunk_size) pairs, in order: chunk i covers global task ids
-    offset..offset+chunk_size-1, submitted as that chunk's array job with local indices
-    0..chunk_size-1. offset is each chunk's global starting position, to be reapplied wherever
-    a chunk's local $SLURM_ARRAY_TASK_ID needs mapping back to its real, global task id, and
-    wherever its reduce job needs mapping back to its job id range.
+@dataclass(frozen=True, kw_only=True, slots=True)
+class JobChunk:
+    """One chunk's slice of the full, global 0..num_jobs-1 task-id range:
+    global task ids offset..offset+chunk_size-1, submitted as that chunk's
+    array job with local indices 0..chunk_size-1. offset is each chunk's
+    global starting position, to be reapplied wherever a chunk's local
+    $SLURM_ARRAY_TASK_ID needs mapping back to its real, global task id,
+    and wherever its reduce job needs mapping back to its job id range.
     """
-    chunks: list[tuple[int, int]] = []
+
+    offset: int
+    chunk_size: int
+
+
+def build_job_chunks(*, num_jobs: int, chunk_size_limit: int) -> list[JobChunk]:
+    """Splits the full, global 0..num_jobs-1 task-id range into consecutive
+    chunks of at most chunk_size_limit each, one per Slurm job array -- see
+    --chunk-size's help for why a single array can't just hold all of
+    num_jobs.
+    """
+    chunks: list[JobChunk] = []
     offset = 0
     while offset < num_jobs:
         chunk_size = min(chunk_size_limit, num_jobs - offset)
-        chunks.append((offset, chunk_size))
+        chunks.append(JobChunk(offset=offset, chunk_size=chunk_size))
         offset += chunk_size
     return chunks
 
@@ -362,23 +372,23 @@ def main() -> None:
     launcher_path = resolve_launcher_path()
     runfiles_dir = resolve_runfiles_dir(launcher_path)
 
-    chunks = build_job_chunks(len(jobs), args.chunk_size)
+    chunks = build_job_chunks(num_jobs=len(jobs), chunk_size_limit=args.chunk_size)
     num_chunks = len(chunks)
     logger.info("Split into %d chunk(s) of up to %d task(s) each (--chunk-size)", num_chunks, args.chunk_size)
 
     if args.dry_run:
-        for chunk_index, (offset, chunk_size) in enumerate(chunks):
+        for chunk_index, chunk in enumerate(chunks):
             logger.info(
                 "[dry_run] chunk %d map command (%d tasks, offset %d):\n%s",
                 chunk_index,
-                chunk_size,
-                offset,
+                chunk.chunk_size,
+                chunk.offset,
                 build_map_command(
                     launcher_path=launcher_path,
                     runfiles_dir=runfiles_dir,
                     args=args,
                     num_fields=num_fields,
-                    job_id_offset=offset,
+                    job_id_offset=chunk.offset,
                 ),
             )
             logger.info(
@@ -389,23 +399,23 @@ def main() -> None:
                     runfiles_dir=runfiles_dir,
                     args=args,
                     num_fields=num_fields,
-                    offset=offset,
-                    chunk_size=chunk_size,
+                    offset=chunk.offset,
+                    chunk_size=chunk.chunk_size,
                 ),
             )
         return
 
-    for chunk_index, (offset, chunk_size) in enumerate(chunks):
+    for chunk_index, chunk in enumerate(chunks):
         map_job_id = submit_map_chunk(
             launcher_path=launcher_path,
             runfiles_dir=runfiles_dir,
             args=args,
             num_fields=num_fields,
             chunk_index=chunk_index,
-            offset=offset,
-            chunk_size=chunk_size,
+            offset=chunk.offset,
+            chunk_size=chunk.chunk_size,
         )
-        logger.info("submitted map chunk %d: job %s (%d tasks)", chunk_index, map_job_id, chunk_size)
+        logger.info("submitted map chunk %d: job %s (%d tasks)", chunk_index, map_job_id, chunk.chunk_size)
 
         reduce_job_id = submit_reduce_chunk(
             launcher_path=launcher_path,
@@ -413,8 +423,8 @@ def main() -> None:
             args=args,
             num_fields=num_fields,
             chunk_index=chunk_index,
-            offset=offset,
-            chunk_size=chunk_size,
+            offset=chunk.offset,
+            chunk_size=chunk.chunk_size,
             map_job_id=map_job_id,
         )
         logger.info(
