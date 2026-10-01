@@ -1,7 +1,7 @@
 import logging
 
-# Matches cresproc's own cresproc/logging.py base_fmt exactly, so log lines
-# from either repo's tools look the same.
+# Matches cresproc/logging.py's base_fmt exactly, so log lines from
+# either repo's tools look the same.
 base_fmt = "%(asctime)s %(levelname)s %(name)s"
 
 
@@ -9,10 +9,8 @@ def apply_overrides(overrides_str: str | None) -> None:
     """Applies a comma-separated "logger_name=LEVEL" list, raising or
     lowering individual loggers independent of whatever their root/parent
     level is (e.g. "botocore=WARNING,myapp.noisy_module=DEBUG"). Split out
-    from init_logging so a caller that doesn't want (or can't safely do,
-    see stage1_steps.make_run_specsims's own doc comment on why a scoped,
-    in-process call shouldn't touch root-level config) init_logging's own
-    logging.basicConfig call can still reuse this part.
+    from init_logging so a caller that wants to adjust logger levels
+    without touching root-level config can reuse just this part.
     """
     if not overrides_str:
         return

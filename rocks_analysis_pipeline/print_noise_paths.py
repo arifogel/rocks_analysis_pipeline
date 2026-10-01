@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
 Resolves and prints the noise file paths for a given noise_id, via
-noise_paths.resolve_noise_paths_from_id (the same DB lookup
-stage1_task.py's own --noise-id flag uses). Useful for checking what a
-noise_id resolves to, or that DB access/the resolved files themselves are
-working, without running any part of stage1_task's own pipeline.
+noise_paths.resolve_noise_paths_from_id. Useful for checking what a
+noise_id resolves to, or that DB access and the resolved files are
+working, without running a full pipeline task.
 
 Example:
     bazel run --@pypi//venv=dev //:print_noise_paths -- --noise-id=1234
