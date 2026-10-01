@@ -69,17 +69,11 @@ def get_pst_time():
 
 
 def set_permissions():
-    """
-    Note that this is necessary for the output (files and dirs) of the analysis to have
-    the right permissions so that all other group members can also run an analysis. The
-    issue is that since not all files in katydid_analysis are owned by any one of us,
-    we will all get long error messages written to our job logs (for each file we don't
-    own). The below still works well but the output is supressed for this reason. In the
-    future we may want a more targeted command (change permissions for all files I own).
-    For now this works.
-
-    NOTE: I think this function is taking a lot of time in our submissions. We should 
-    limit it's use whenever possible. 
+    """Chgrp/chmod's katydid_analysis/ to group he6_cres, mode 774, so every
+    group member can run an analysis against outputs owned by any one
+    user. Output is suppressed: without that, chmod/chgrp print a
+    permission-error line for every file not owned by the current user,
+    cluttering job logs. Costly on a large tree -- call sparingly.
     """
     timeout_seconds = 30
 

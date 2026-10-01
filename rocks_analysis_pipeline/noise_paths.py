@@ -1,9 +1,8 @@
-"""Noise-path resolution, factored out of stage1_steps.py into its own
-module: resolving a noise_id only needs pandas and rocks_utility's own
-he6cres_db_query, not the rest of stage1_steps_lib's dependency chain
-(he6-cres-spec-sims, uproot, the api/v1 proto schema) -- kept separate so
-a lightweight consumer (see print_noise_paths.py) doesn't have to pull in
-any of that just to look up a couple of file paths.
+"""Noise-path resolution. Resolving a noise_id only needs pandas and
+rocks_utility's he6cres_db_query, not the rest of stage1_steps_lib's
+dependency chain (he6-cres-spec-sims, uproot, the api/v1 proto schema).
+Kept as a separate module so a lightweight consumer doesn't have to pull
+in any of that just to look up a couple of file paths.
 """
 
 import logging
@@ -17,28 +16,17 @@ logger = logging.getLogger(__name__)
 
 
 def resolve_noise_paths_from_id(noise_id: int) -> list[str]:
-    """Restores RunSpecSims.get_noise_fp's own SQL-based noise-path
-    resolution (run_spec_sims.py, before commit ec2a84c54c3da51efe17c6b01cc06ed19542ca15
-    removed it entirely), adapted from a method on that class to a
-    standalone function here. Behavior matches the original exactly,
-    including its own comments/reasoning:
+    """Resolves a noise_id to its noise file paths on wulf.
 
-    - Queries he6cres_runs.spec_files for noise_id, ordered by channel,
-      taking the first 2 rows (channel 0 and 1) -- "just takes the first
-      file in this run_id (assumption is it's a one file acq)".
-    - Groups by file_in_acq and aggregates into one ordered-by-channel
-      path list per acquisition, taking the first such group. The dummy
-      true_field=0 column exists only because aggregate_paths's own
-      aggregation (used elsewhere for real signal files, where true_field
-      is meaningful) requires that column to exist -- meaningless for
-      noise files, preserved as-is rather than reworked, matching this
-      project's own decision to keep this restoration a faithful port,
-      not a rewrite.
-    - Translates the stored path (relative to /mnt) to wulf's own
-      directory structure, and verifies each resolved file actually
-      exists before returning -- exactly the check this project's own
-      RuntimeError-on-noise-load-failure fix (see this repo's own commit
-      history) is the second line of defense for, not a replacement for.
+    Queries he6cres_runs.spec_files for noise_id, ordered by channel,
+    taking the first 2 rows (channel 0 and 1) -- assumes a one-file
+    acquisition. Groups by file_in_acq and aggregates into one
+    ordered-by-channel path list per acquisition, taking the first such
+    group; the true_field column exists only because the aggregation
+    step below needs that column present, and is otherwise unused here.
+    Translates the stored path (relative to /mnt) to wulf's directory
+    structure, and verifies each resolved file actually exists before
+    returning.
     """
     query_he6_db = """
                     SELECT f.run_id, f.file_path, f.file_in_acq, f.channel
@@ -57,7 +45,7 @@ def resolve_noise_paths_from_id(noise_id: int) -> list[str]:
         ordered_paths = group.sort_values(by="channel")["file_path"].apply(str).tolist()
         return pd.Series({"true_field": group["true_field"].iloc[0], "file_path": ordered_paths})
 
-    # Make dummy true_field column to use agg function. this is dumb fix later
+    # true_field is unused here; aggregate_paths needs the column present.
     noise_file_df["true_field"] = 0
     noise_file_df = noise_file_df.groupby("file_in_acq").apply(aggregate_paths).reset_index(drop=True)
 

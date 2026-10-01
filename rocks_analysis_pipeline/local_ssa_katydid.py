@@ -14,15 +14,10 @@ No persisted state: every invocation rebuilds the full file list from
 what's actually on disk and reruns unconditionally -- no checkpoint CSV,
 no skip-if-output-exists.
 
-Reused, near-verbatim, from run_ssa_katydid.py: the .speck glob-and-group
-logic (create_base_file_df/aggregate_paths), get_slope's physics
-calculation, the frequency-acceptance/time-gap-tolerance formula, and the
-katydid command-line construction. NOT reused: machine_path hardcoding
-(replaced with explicit --runs_base_dir/--katydid_output_dir),
-noise-run-id database lookup (replaced with explicit --noise_paths),
-base-config-directory indirection (replaced with an explicit
---katydid_config path), the checkpoint/cleanup dataframe branch, and
-apptainer/sbatch wrapping.
+Output paths come directly from --runs_base_dir/--katydid_output_dir/
+--katydid_config; nothing is derived from a machine-specific hardcoded
+path, a noise-run-id database lookup, or a base-config-directory. Runs
+directly via `bazel run`, with no apptainer/sbatch wrapping.
 
 Example:
     bazel run --@pypi//venv=dev //:local_ssa_katydid -- \\
@@ -147,50 +142,46 @@ def parse_args() -> argparse.Namespace:
 
 
 def get_slope(true_field: float, frequency: float = 19.15e9) -> float:
-    """Reused verbatim from run_ssa_katydid.py."""
+    """Computes the approximate track slope (df/dt) for a given true_field
+    and detector frequency, via spec_calc's power/energy/slope relations.
+    """
     approx_power = sc.power_larmor(true_field, frequency)
     approx_energy = sc.freq_to_energy(frequency, true_field)
     approx_slope = sc.df_dt(approx_energy, true_field, approx_power)
     return approx_slope
 
 
-# The only Katydid processor type, anywhere in its own source tree, whose
-# Configure() reads a "set-field" key (KTMultiBandEventBuilder.cc) --
-# confirmed by grepping Source/ for every file that references "set-field"
-# at all: exactly one. If Katydid ever adds another processor type that
-# also reads this key, add its own type string here too.
+# KTMultiBandEventBuilder.cc is the only Katydid processor type whose
+# Configure() reads a "set-field" key; no other file under Source/
+# references "set-field" at all. If Katydid ever adds another processor
+# type that also reads this key, add its type string here too.
 KATYDID_SET_FIELD_PROCESSOR_TYPES = frozenset({"multi-band-event-builder"})
 
 
 def render_katydid_config(base_config_path: str, true_field: float, output_path: Path) -> None:
     """Writes a copy of base_config_path to output_path with set-field
     written -- creating it if it wasn't already present -- into the config
-    block of every processor *instance* whose declared type is one that
-    Katydid's own source confirms actually reads that key (see
-    KATYDID_SET_FIELD_PROCESSOR_TYPES), found via the config's own
-    processors: list (each entry's own name: is the key its config block
-    lives under elsewhere in the same document). Deliberately not a fixed
-    location like "mbeb" (fragile: assumes every config names its
-    multi-band-event-builder instance that specific way) and not a blind
-    replace of every key literally named "set-field" anywhere in the
-    document (risky: could clobber an unrelated key of some other,
-    differently-typed processor that happens to share the name) -- this
-    targets exactly the processor instances Katydid's own source says
-    consume this key, by their declared type, wherever they're named.
+    block of every processor *instance* whose declared type reads that
+    key (see KATYDID_SET_FIELD_PROCESSOR_TYPES), found via the config's
+    processors: list (each entry's name: is the key its config block lives
+    under elsewhere in the same document). This targets exactly the
+    processor instances that consume this key, by their declared type,
+    wherever they're named -- not a fixed location like "mbeb" (fragile:
+    assumes every config names its multi-band-event-builder instance that
+    specific way) and not a blind replace of every key literally named
+    "set-field" anywhere in the document (risky: could clobber an
+    unrelated key of some other, differently-typed processor that happens
+    to share the name).
 
-    This is the actual fix for a real problem, not a preemptive nicety:
-    prior to this, every row in a run shared one static katydid_config
-    file, and nothing anywhere in this pipeline ever varied its
-    multi-band-event-builder instance's set-field value per row --
-    confirmed directly (not assumed) by grepping this file,
-    run_ssa_katydid.py, and sbatch_ssa_katydid.py for any reference to
-    "set-field" at all (none). Separately, and not fixable from this repo:
-    KTMultiBandEventBuilder.cc itself reads the value into fSetField but
-    never references it again anywhere in Katydid's own codebase, so even
-    a correctly-set value currently has no effect on any computation --
-    still worth fixing here regardless, since rendering the field MBEB is
-    told about to match the field actually simulated is this repo's own
-    responsibility, independent of whether Katydid currently acts on it.
+    Each row in a run gets its own rendered config with its own
+    true_field value, rather than every row sharing one static
+    katydid_config file with no per-row variation.
+    KTMultiBandEventBuilder.cc reads the value into fSetField but never
+    references it again anywhere in Katydid's codebase, so a
+    correctly-set value currently has no effect on any computation --
+    still worth rendering correctly regardless, since matching the field
+    MBEB is told about to the field actually simulated doesn't depend on
+    whether Katydid currently acts on it.
     """
     with open(base_config_path) as f:
         config_dict = yaml.load(f, Loader=yaml.FullLoader)
@@ -212,8 +203,9 @@ def render_katydid_config(base_config_path: str, true_field: float, output_path:
 
 
 def build_slew_root_filename(row: pd.Series, output_dir: str, footer: str) -> str:
-    """Reused verbatim (modulo taking output_dir explicitly rather than from
-    the row) from run_ssa_katydid.py's build_slew_root_filename."""
+    """Builds a row's filename under output_dir, from subrun_id,
+    true_field, and acquisition, with the given footer (e.g. ".root",
+    "_SlewTimes.txt")."""
     root_path = output_dir + "/"
     root_path += str(row["subrun_id"]) + "_"
     root_path += str(row["true_field"]) + "T_"
@@ -223,9 +215,11 @@ def build_slew_root_filename(row: pd.Series, output_dir: str, footer: str) -> st
 
 
 def build_file_df_for_subrun(run_name: str, runs_base_dir: str, subrun_id: int, output_dir: str) -> pd.DataFrame:
-    """Reused, near-verbatim, from run_ssa_katydid.py's create_base_file_df,
-    plus a new field_index column (parsed from the per-field directory name,
-    e.g. "3_field_1.92223T" -> 3) that the original never surfaced.
+    """Builds one subrun's file_df: globs its .speck files, parses
+    subrun_id/acquisition/channel/field_index from each path (field_index
+    from the per-field directory name, e.g. "3_field_1.92223T" -> 3), and
+    joins in seed/true_field/trap_current from each (subrun, field)'s
+    spec-sims yaml config.
     """
     speck_glob = str(Path(runs_base_dir) / run_name / f"subrun_{subrun_id}" / "*" / "spec_files" / "*.speck")
     speck_files = glob(speck_glob)
@@ -312,10 +306,10 @@ def apply_dry_run_filters(file_df: pd.DataFrame, args: argparse.Namespace) -> pd
 
 
 def build_katydid_command(row: pd.Series, katydid_path: str, noise_paths: list[str]) -> list[str]:
-    """Reused, with one real change, from run_ssa_katydid.py's run_katydid:
-    -c now points at row's own rendered_katydid_config_path (see
-    render_katydid_config) instead of a single static config path shared,
-    unmodified, by every row."""
+    """Builds the katydid command line for one row: -c points at row's own
+    rendered_katydid_config_path (see render_katydid_config), rendered per
+    row rather than a single static config path shared, unmodified, by
+    every row."""
     katydid_command_list = [katydid_path, "-c", row["rendered_katydid_config_path"]]
 
     for i in range(2):

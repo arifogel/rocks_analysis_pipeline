@@ -16,12 +16,10 @@ jobs:
         os: [ubuntu-24.04, macos-14]
         compilation_mode: [fastbuild]
         include:
-          # dbg and opt get special-cased handling in the Bazel build (see .bazelrc's
-          # STANDARD define and KTLogger's own NDEBUG/STANDARD-gated verbosity floor) that
-          # fastbuild alone never exercises - dbg is also specifically the mode CLion's
-          # Bazel plugin uses when debugging, and opt is what actual production runs use.
-          # One OS is enough to catch a regression in either; this logic is not
-          # platform-specific, so it isn't worth tripling the full OS matrix for it.
+          # dbg and opt exercise build-mode-specific behavior (.bazelrc's STANDARD define,
+          # KTLogger's NDEBUG/STANDARD-gated verbosity floor) that fastbuild never does. dbg
+          # is also what CLion's Bazel plugin uses when debugging; opt is what production
+          # runs use. Not platform-specific, so one OS covers both without tripling the matrix.
           - os: ubuntu-24.04
             compilation_mode: dbg
           - os: ubuntu-24.04
@@ -59,11 +57,11 @@ jobs:
             libmatio-dev \
             libtbb12 \
             libblas3
-          # lock and partial/ are apt's own root-owned runtime bookkeeping, not downloaded
-          # package files - the cache step above only wants the actual .deb files. Left in
-          # place, both are unreadable by the (non-root) runner user, and the post-job cache
-          # save step fails outright trying to archive them ("Permission denied"), taking the
-          # whole cache down with it rather than just skipping these two paths.
+          # lock and partial/ are apt's root-owned runtime bookkeeping, not downloaded package
+          # files -- the cache step above only wants the actual .deb files. Both are
+          # unreadable by the (non-root) runner user, and the post-job cache save step fails
+          # outright trying to archive them ("Permission denied"), taking the whole cache down
+          # with it.
           sudo rm -f /var/cache/apt/archives/lock
           sudo rm -rf /var/cache/apt/archives/partial
 
@@ -90,11 +88,11 @@ jobs:
           repository-cache: true
           disk-cache: true
           # Without this, all three ubuntu-24.04 variants (fastbuild/dbg/opt) compute an
-          # identical disk-cache key (setup-bazel's own cache key is scoped by platform/arch,
-          # not by anything specific to this workflow's matrix), and race to save to the same
-          # slot - not a correctness risk, since Bazel's disk cache is content-addressed
-          # internally, but only one of the three would actually persist between CI runs,
-          # non-deterministically. This gives each compilation mode its own cache namespace.
+          # identical disk-cache key (setup-bazel's cache key is scoped by platform/arch, not
+          # by anything specific to this workflow's matrix), and race to save to the same
+          # slot -- not a correctness risk, since Bazel's disk cache is content-addressed
+          # internally, but only one of the three persists between CI runs, non-deterministically.
+          # This gives each compilation mode its own cache namespace.
           cache-version: ${{ matrix.compilation_mode }}
 
       - name: Verify MODULE.bazel.lock is up to date and build everything
@@ -126,13 +124,12 @@ jobs:
           path: /var/cache/dnf
           key: dnf-cache-almalinux9-${{ hashFiles('.github/workflows/ci.yaml') }}
 
-      # AlmaLinux is a RHEL-family Linux distribution, using dnf rather than apt. gcc-c++ (a C++
-      # compiler) and git (which Bazel uses to fetch this repo's bundled dependencies) are
-      # Bazel's requirements, missing from this minimal container image by default. cpio
-      # unpacks the .rpm packages katydid's tools/almalinux_libs.bzl fetches; rpm2cpio ships with
-      # the base image as part of the `rpm` package. Bazel fetches Boost/FFTW/MatIO/TBB/xxhash/
-      # FreeType/GSL hermetically from AlmaLinux's and EPEL's pinned package archives (see
-      # katydid's tools/almalinux_libs.bzl).
+      # AlmaLinux is RHEL-family (dnf, not apt). gcc-c++ and git (which Bazel uses to fetch
+      # this repo's bundled dependencies) are Bazel's requirements, missing from this minimal
+      # container image by default. cpio unpacks the .rpm packages katydid's
+      # tools/almalinux_libs.bzl fetches; rpm2cpio ships with the base image's rpm package.
+      # Bazel fetches Boost/FFTW/MatIO/TBB/xxhash/FreeType/GSL hermetically from AlmaLinux's
+      # and EPEL's pinned package archives (see katydid's tools/almalinux_libs.bzl).
       - name: Install build tools (dnf)
         run: |
           dnf install -y --setopt=keepcache=True \
@@ -145,19 +142,18 @@ jobs:
       - name: Configure git for private repo access
         run: git config --global url."https://${{ secrets.READ_PRIVATE_CRES_REPOS }}@github.com/".insteadOf "https://github.com/"
 
-      # bazel-contrib/setup-bazel's usual automatic Bazel installation does not reliably work
-      # inside this minimal container image, so Bazelisk (the tool that installs the correct
-      # Bazel version automatically) is installed directly here instead, using the standard
-      # installation method documented by the Bazel project itself.
+      # setup-bazel's automatic Bazel installation is unreliable inside this minimal
+      # container image, so Bazelisk is installed directly here via the standard
+      # installation method Bazel documents.
       - name: Install Bazelisk directly (works regardless of what setup-bazel's installer needs)
         run: |
           wget -q -O /usr/local/bin/bazel \
             https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64
           chmod +x /usr/local/bin/bazel
 
-      # Caches the actual Bazel release binary that Bazelisk downloads (much larger than
-      # Bazelisk itself), in case setup-bazel's own caching does not take effect reliably in
-      # this container the way it does on the native runners above.
+      # Caches the Bazel release binary Bazelisk downloads (much larger than Bazelisk
+      # itself), for when setup-bazel's caching doesn't reliably apply in this container,
+      # unlike on the native runners above.
       - name: Cache Bazelisk's downloaded Bazel binary
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
@@ -170,22 +166,19 @@ jobs:
           bazelisk-cache: true
           repository-cache: true
           disk-cache: true
-          # Without this, this job shares a cache namespace with the ubuntu-24.04 matrix
-          # jobs above: setup-bazel's own disk-cache key is scoped by the *runner's* platform/
-          # arch, not by anything specific to this job -- and since this job is runs-on:
-          # ubuntu-latest with container: almalinux:9 (the container changes what actually
-          # executes, not what the runner itself reports), setup-bazel sees the identical
-          # "linux-x64" identity the native Ubuntu jobs do. GitHub Actions cache keys are
-          # immutable once written (a save to an existing key is silently skipped, never
-          # overwritten) -- so a save under a shared, colliding key, from any job, at any
-          # point, permanently locks that slot's content in for every future run under that
-          # same key, regardless of which job's own build actually produced it. Confirmed
-          # directly, not assumed: a real run showed this job restoring a "successful" cache
-          # hit that was only ~5 MB (disk) / ~0 MB (repository) -- far too small to be a real
-          # Katydid build's own disk cache, and Bazel recompiling everything from scratch
-          # despite the "successful" restore. cache-version below gives this job its own,
-          # unshared slot, the same mechanism (and the same reasoning) as the Ubuntu matrix
-          # job's own cache-version above.
+          # Without this, this job shares a cache namespace with the ubuntu-24.04 matrix jobs
+          # above: setup-bazel's disk-cache key is scoped by the runner's platform/arch, not by
+          # anything specific to this job -- and since this job runs on ubuntu-latest with
+          # container: almalinux:9 (the container changes what executes, not what the runner
+          # reports), setup-bazel sees the same "linux-x64" identity the native Ubuntu jobs do.
+          # GitHub Actions cache keys are immutable once written (a save to an existing key is
+          # silently skipped, never overwritten), so a save under a shared, colliding key, from
+          # any job, at any point, permanently locks that slot's content in for every future run
+          # under that key, regardless of which job's build produced it. A shared key here
+          # collapses to a ~5 MB disk / ~0 MB repository cache -- far too small for a real
+          # Katydid build -- forcing Bazel to recompile from scratch despite a "successful"
+          # restore. cache-version below gives this job an unshared slot, the same mechanism as
+          # the Ubuntu matrix jobs' cache-version above.
           cache-version: almalinux9
 
       - name: Verify MODULE.bazel.lock is up to date and build everything

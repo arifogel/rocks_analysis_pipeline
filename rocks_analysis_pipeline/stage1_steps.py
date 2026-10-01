@@ -1,20 +1,15 @@
-"""Concrete implementations of stage1_state.STEPS, one function per step,
-matching the Callable[[Path], None] shape run_stage1_task's own step_fns
-expects (each takes the task's own task_dir as its only argument).
+"""Concrete implementations of the stage-1 steps, one function per step.
+Each takes the task's task_dir as its only argument and returns None.
 
-Kept separate from stage1_state.py on purpose: that module owns sequencing
-(what order things happen in, how to resume), this one owns what each step
-actually does. Every step is implemented for real. specsims_done and
-katydid_done are the two exceptions to the plain Callable[[Path], None]
-shape: make_run_specsims/make_run_katydid are factories, not step functions
-directly, since those two steps need more than task_dir alone (the base
-yaml/json configs, the katydid config, noise paths) -- see their own doc
-comments for why. STEP_FNS below leaves those two as NotImplementedError
-placeholders; a real caller builds the two real closures
-via those factories and overrides STEP_FNS's own placeholders with them.
+specsims_done and katydid_done are the two exceptions: make_run_specsims and
+make_run_katydid are factories that build the real step closures, since
+those two steps need more than task_dir alone (the base yaml/json configs,
+the katydid config, noise paths). STEP_FNS below leaves those two as
+NotImplementedError placeholders for a caller to override with the real
+closures.
 
-This module is also the single source of truth for stage 1's on-disk file
-layout (SPECSIMS_CONFIG_FILENAME, ROOT_FILENAME, etc. below).
+Single source of truth for stage 1's on-disk file layout
+(SPECSIMS_CONFIG_FILENAME, ROOT_FILENAME, etc. below).
 """
 
 import json
@@ -45,9 +40,9 @@ KATYDID_RLOCATION = "katydid+/release/katydid.sh"
 SPECSIMS_LOG_FILENAME = "specsims.log"
 COMPRESSED_SPECSIMS_LOG_FILENAME = SPECSIMS_LOG_FILENAME + ".zst"
 
-# specsims's own config and output layout within task_dir. Named
+# specsims's config and output layout within task_dir. Named
 # "specsims.yaml" (not e.g. "config.yaml") specifically so
-# Simulation.run_full()'s own config_path.stem-derived output directory
+# Simulation.run_full()'s config_path.stem-derived output directory
 # comes out as "specsims/", not the meaningless "config/" a differently-
 # named config file would produce.
 SPECSIMS_CONFIG_FILENAME = "specsims.yaml"
@@ -55,13 +50,13 @@ SPECSIMS_OUTPUT_DIRNAME = "specsims"
 BANDS_CSV_FILENAME = "bands.csv"
 DMTRACKS_CSV_FILENAME = "dmtracks.csv"
 
-# Katydid's own output layout within task_dir.
+# Katydid's output layout within task_dir.
 ROOT_FILENAME = "track.root"
 SLEW_TIMES_FILENAME = "slew_times.txt"
 KATYDID_LOG_FILENAME = "katydid.log"
 COMPRESSED_KATYDID_LOG_FILENAME = KATYDID_LOG_FILENAME + ".zst"
 
-# This module's own proto+zstd output layout within task_dir.
+# This module's proto+zstd output layout within task_dir.
 BANDS_PROTO_FILENAME = "bands.pb.zst"
 DMTRACKS_PROTO_FILENAME = "dmtracks.pb.zst"
 EVENTS_PROTO_FILENAME = "events.pb.zst"
@@ -73,33 +68,24 @@ SLEW_TIMES_PROTO_FILENAME = "slew_times.pb.zst"
 # tree, reached via chained indexing, not a slash-joined top-level tree path.
 MB_EVENTS_TREE_NAME = "MB-events"
 
-# Katydid's standalone long-track-finder output tree, separate from MB_EVENTS_TREE_NAME above
-# (see point.proto's doc comment on the distinction: Point's per-point data lives here, Event's
-# per-event data does not).
+# Katydid's standalone long-track-finder output tree, separate from
+# MB_EVENTS_TREE_NAME above: per-point data lives here, per-event data does
+# not.
 KATYDID_TRACKS_TREE_NAME = "tracks"
 
 
-def _compress_log(task_dir: Path, log_filename: str, compressed_filename: str) -> None:
+def _compress_log(*, task_dir: Path, log_filename: str, compressed_filename: str) -> None:
     """Compresses task_dir/log_filename to task_dir/compressed_filename,
-    leaving the original in place (deletion is a separate step -- see
-    stage1_state.py's own reasoning on why). Real, measured payoff, not a
-    guess: this project's own local_spec_sims.log compressed
-    4,871,860 -> 100,590 bytes (48.4x) in one real run, log text being far
-    more repetitive than the numeric spec/speck data.
+    leaving the original in place.
 
-    Uses the stdlib compression.zstd module (available with zero extra
-    dependencies: this repo's own MODULE.bazel/pyproject.toml already pin
-    Python 3.14+, which is what added it -- see PEP 784) rather than
+    Uses the stdlib compression.zstd module (Python 3.14+) rather than
     shelling out to a system zstd binary, whose presence can't be assumed
-    across every node of an HPC cluster (AlmaLinux 9's own default/minimal
-    install doesn't appear to include it based on the available evidence,
-    though this wasn't confirmed against official documentation).
+    across every node of an HPC cluster.
 
-    Generic over which log (shared by compress_specsims_log/
-    compress_katydid_log below): the logic is identical for both, only the
-    filenames differ, and specsims's own log-compression is deliberately
-    not gated on Katydid's (they're independent lifecycles, gated on
-    specsims_done and katydid_done respectively -- see STEPS's own order).
+    Shared by compress_specsims_log and compress_katydid_log below: the
+    logic is identical for both, only the filenames differ. The two logs
+    compress on independent schedules, gated on specsims_done and
+    katydid_done respectively.
     """
     log_path = task_dir / log_filename
     compressed_path = task_dir / compressed_filename
@@ -115,19 +101,19 @@ def _compress_log(task_dir: Path, log_filename: str, compressed_filename: str) -
 
 
 def _delete_uncompressed_log(task_dir: Path, log_filename: str) -> None:
-    """Deletes the uncompressed log. Only ever runs after the matching
-    _compress_log call in STEPS's own fixed order, so the compressed copy
-    is guaranteed to exist already. missing_ok=True: deleting an
-    already-deleted file (e.g. this step re-running after a crash between
-    the delete and its own checkpoint being recorded) is expected to be
-    harmless, not an error.
+    """Deletes the uncompressed log. Runs after the matching compress step,
+    so the compressed copy already exists. missing_ok=True tolerates
+    deleting an already-deleted file, e.g. if this step reran after a
+    crash between the delete and its checkpoint being recorded.
     """
     (task_dir / log_filename).unlink(missing_ok=True)
     logger.info("%s (uncompressed) deleted", log_filename)
 
 
 def compress_specsims_log(task_dir: Path) -> None:
-    _compress_log(task_dir, SPECSIMS_LOG_FILENAME, COMPRESSED_SPECSIMS_LOG_FILENAME)
+    _compress_log(
+        task_dir=task_dir, log_filename=SPECSIMS_LOG_FILENAME, compressed_filename=COMPRESSED_SPECSIMS_LOG_FILENAME
+    )
 
 
 def delete_uncompressed_specsims_log(task_dir: Path) -> None:
@@ -135,7 +121,9 @@ def delete_uncompressed_specsims_log(task_dir: Path) -> None:
 
 
 def compress_katydid_log(task_dir: Path) -> None:
-    _compress_log(task_dir, KATYDID_LOG_FILENAME, COMPRESSED_KATYDID_LOG_FILENAME)
+    _compress_log(
+        task_dir=task_dir, log_filename=KATYDID_LOG_FILENAME, compressed_filename=COMPRESSED_KATYDID_LOG_FILENAME
+    )
 
 
 def delete_uncompressed_katydid_log(task_dir: Path) -> None:
@@ -144,9 +132,8 @@ def delete_uncompressed_katydid_log(task_dir: Path) -> None:
 
 def _task_identity(task_dir: Path) -> task_identity_pb2.TaskIdentity:
     """Builds this task's TaskIdentity: run_name/subrun_id/field_index
-    parsed back out of task_dir itself (see stage1_state.parse_task_dir's
-    own doc comment for why that's safe here), and true_field read from
-    specsims.yaml -- the only place it exists anywhere in this pipeline.
+    parsed back out of task_dir via parse_task_dir, and true_field read
+    from specsims.yaml -- the only place it exists in this pipeline.
     """
     run_name, subrun_id, field_index = parse_task_dir(task_dir)
     with open(task_dir / SPECSIMS_CONFIG_FILENAME) as f:
@@ -167,9 +154,8 @@ def _write_proto_zst(message, path: Path) -> None:
 
 
 def run_bands_proto_conversion(task_dir: Path) -> None:
-    """bands.csv -> BandList -> bands.pb.zst. Column names in the CSV (see band.proto's doc
-    comment) already match Band's snake_case field names exactly, so no column-name mapping
-    is needed.
+    """bands.csv -> BandList -> bands.pb.zst. Column names in the CSV already
+    match Band's snake_case field names, so no column-name mapping is needed.
     """
     csv_path = task_dir / SPECSIMS_OUTPUT_DIRNAME / BANDS_CSV_FILENAME
     df = pd.read_csv(csv_path, index_col=0)
@@ -194,7 +180,7 @@ def run_bands_proto_conversion(task_dir: Path) -> None:
 
 def run_dmtracks_proto_conversion(task_dir: Path) -> None:
     """dmtracks.csv -> DMTrackList -> dmtracks.pb.zst. Column names in the
-    real CSV already match DMTrack's own snake_case field names exactly."""
+    CSV already match DMTrack's snake_case field names."""
     csv_path = task_dir / SPECSIMS_OUTPUT_DIRNAME / DMTRACKS_CSV_FILENAME
     df = pd.read_csv(csv_path, index_col=0)
 
@@ -202,11 +188,9 @@ def run_dmtracks_proto_conversion(task_dir: Path) -> None:
     dmtrack_list.task.CopyFrom(_task_identity(task_dir))
     for row in df.itertuples(index=False):
         d = dmtrack_list.dmtracks.add()
-        # Every DMTrack field is a plain double (see dmtrack.proto's own doc
-        # comment on why, including the five count-like columns) and the
-        # CSV's own column order already matches the proto's field
-        # declaration order exactly, so this can iterate positionally
-        # rather than needing 38 named assignments.
+        # Every DMTrack field is a double and the CSV's column order already
+        # matches the proto's field declaration order, so this can iterate
+        # positionally instead of writing 38 named assignments.
         for value, field in zip(row, dmtrack_pb2.DMTrack.DESCRIPTOR.fields):
             setattr(d, field.name, value)
 
@@ -215,9 +199,9 @@ def run_dmtracks_proto_conversion(task_dir: Path) -> None:
 
 
 def delete_mc_truth(task_dir: Path) -> None:
-    """Deletes bands.csv and dmtracks.csv. Only ever runs after both
-    bands_proto_done and dmtracks_proto_done in STEPS's own fixed order.
-    missing_ok=True for the same reason as _delete_uncompressed_log."""
+    """Deletes bands.csv and dmtracks.csv. Runs after both bands_proto_done
+    and dmtracks_proto_done complete. missing_ok=True tolerates an
+    already-deleted file."""
     (task_dir / SPECSIMS_OUTPUT_DIRNAME / BANDS_CSV_FILENAME).unlink(missing_ok=True)
     (task_dir / SPECSIMS_OUTPUT_DIRNAME / DMTRACKS_CSV_FILENAME).unlink(missing_ok=True)
     logger.info("mc_truth_deleted: bands.csv, dmtracks.csv")
@@ -243,7 +227,7 @@ def get_slope(true_field: float, frequency: float = 19.15e9) -> float:
 KATYDID_SET_FIELD_PROCESSOR_TYPES = frozenset({"multi-band-event-builder"})
 
 
-def render_katydid_config(base_config_path: str, true_field: float, output_path: Path) -> None:
+def render_katydid_config(*, base_config_path: str, true_field: float, output_path: Path) -> None:
     """Writes a copy of base_config_path with every KATYDID_SET_FIELD_PROCESSOR_TYPES processor
     instance's set-field set to true_field."""
     with open(base_config_path) as f:
@@ -264,14 +248,15 @@ def render_katydid_config(base_config_path: str, true_field: float, output_path:
         yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False)
 
 
-def render_specsims_config(task_dir: Path, yaml_config: str, json_config: str, initial_seed: int, noise_paths: list[str]) -> Path:
+def render_specsims_config(
+    *, task_dir: Path, yaml_config: str, json_config: str, initial_seed: int, noise_paths: list[str]
+) -> Path:
     """Renders this one task's specsims.yaml for exactly one (subrun, field) pair, since a
     stage-1 task is exactly one such pair. seed = initial_seed + subrun_id. Returns the path it
     wrote to.
 
     noise_paths is written to yaml_dict["DAQ"]["noise_paths"] unconditionally: a resolved
-    noise_paths value is always available by the time this runs (see
-    resolve_noise_paths_from_id), so there's no case where it should be omitted.
+    value is always available by the time this runs.
     """
     run_name, subrun_id, field_index = parse_task_dir(task_dir)
     seed = initial_seed + subrun_id
@@ -306,6 +291,7 @@ def render_specsims_config(task_dir: Path, yaml_config: str, json_config: str, i
 
 
 def make_run_specsims(
+    *,
     yaml_config: str,
     json_config: str,
     initial_seed: int,
@@ -313,57 +299,48 @@ def make_run_specsims(
     use_ghcss: bool = False,
 ) -> Callable[[Path], None]:
     """Builds the run_specsims step function for one stage-1 run, capturing
-    yaml_config/json_config/initial_seed/noise_paths via closure --
-    run_stage1_task's own step_fns interface only ever passes task_dir
-    itself (see run_stage1_task's own doc comment), so anything a step
-    needs beyond that has to be captured this way rather than threaded
-    through that interface.
+    yaml_config/json_config/initial_seed/noise_paths via closure, since a
+    step function takes only task_dir.
 
-    Renders this task's own specsims.yaml (see render_specsims_config's
-    own doc comment), then actually runs it. Default (use_ghcss=False):
-    calls he6_cres_spec_sims.simulation.Simulation.run_full() directly --
-    the real simulation code path, not just config generation, since this
-    step's whole job is running a simulation, so importing what does that
-    is unavoidable. use_ghcss=True instead resolves and invokes the
-    specsims Go binary as a subprocess, the same way ghcss is invoked
-    elsewhere in this project -- kept as an option per instruction, but
-    not the default: ghcss's measured throughput gain (35 MB/min vs.
-    31 MB/min from he6-cres-spec-sims) doesn't justify the code-review
-    surface of adopting it project-wide.
+    Renders this task's specsims.yaml, then runs it. use_ghcss=False
+    (the default) calls he6_cres_spec_sims.simulation.Simulation.run_full()
+    directly. use_ghcss=True instead resolves and invokes the specsims Go
+    binary as a subprocess: its measured throughput (35 MB/min vs.
+    31 MB/min for he6-cres-spec-sims) doesn't justify the code-review
+    surface of adopting it as the default.
 
-    Log capture differs by branch, deliberately: use_ghcss's subprocess
-    has its own stdout piped straight to the log file (the only mechanism
-    available for a subprocess, independent of what it does internally).
-    The in-process he6-cres-spec-sims branch instead attaches a
-    logging.FileHandler directly to the "he6_cres_spec_sims" package
-    logger (every module inside it uses logging.getLogger(__name__), a
-    descendant of that name) -- not root, since a root-level handler
-    would also capture anything else running in this same process for the
-    call's whole duration, and not raw sys.stdout/stderr redirection,
-    since he6-cres-spec-sims's log calls (not raw print()) are what
-    this handler-based capture relies on. propagate=False for the same
-    scoping reason, so nothing from this call also reaches a root-level
-    handler if one happens to exist.
+    Log capture differs by branch. use_ghcss's subprocess has its stdout
+    piped straight to the log file. The in-process branch instead attaches
+    a logging.FileHandler to the "he6_cres_spec_sims" package logger
+    (every module in it uses logging.getLogger(__name__), a descendant of
+    that name) rather than root, so the handler doesn't also capture
+    unrelated logging in this process; propagate=False keeps it from also
+    reaching a root-level handler.
 
-    This is the *only* logging setup this function does. Which messages actually get emitted
-    (the level, and any per-logger overrides) is root-level config, set once via
-    logging_setup.init_logging at process startup. "he6_cres_spec_sims" has no explicit level
-    set anywhere in this function, so it inherits its effective level from root by Python's
-    normal logging hierarchy rules regardless of propagate=False -- propagate only controls
-    whether an emitted record also reaches an ancestor's handler, not whether the logger emits
-    the record in the first place. A root level of INFO (this project's default log level) keeps
-    he6-cres-spec-sims's per-chunk debug lines (one specific line fires ~146,500 times per
-    acquisition) suppressed by default through that inheritance.
+    This function sets no explicit level on the "he6_cres_spec_sims"
+    logger, so it inherits its effective level from root regardless of
+    propagate=False -- propagate only controls whether a record also
+    reaches an ancestor's handler, not whether it's emitted. Root level is
+    set once via logging_setup.init_logging at process startup; at the
+    project's default of INFO, this keeps he6-cres-spec-sims's per-chunk
+    debug lines (one line fires ~146,500 times per acquisition)
+    suppressed.
 
-    Also bridges the warnings module (numpy/scipy's own RuntimeWarning
-    etc., which bypass logging entirely by default) into the same log
+    Also bridges the warnings module (numpy/scipy's RuntimeWarning etc.,
+    which bypass logging entirely by default) into the same log
     file via logging.captureWarnings, scoped and restored the same way.
     """
 
     def fn(task_dir: Path) -> None:
-        config_path = render_specsims_config(task_dir, yaml_config, json_config, initial_seed, noise_paths)
+        config_path = render_specsims_config(
+            task_dir=task_dir,
+            yaml_config=yaml_config,
+            json_config=json_config,
+            initial_seed=initial_seed,
+            noise_paths=noise_paths,
+        )
         log_path = task_dir / SPECSIMS_LOG_FILENAME
-        logger.info("specsims starting (use_ghcss=%s), own log -> %s", use_ghcss, log_path)
+        logger.info("specsims starting (use_ghcss=%s), log -> %s", use_ghcss, log_path)
 
         if use_ghcss:
             with open(log_path, "w", buffering=1) as log_file:
@@ -382,26 +359,19 @@ def make_run_specsims(
             prev_propagate = he6_logger.propagate
             he6_logger.propagate = False
 
-            # Bridge Python's warnings module (numpy/scipy's own
-            # RuntimeWarning etc. go through this, not logging, by
-            # default) into the same log file. captureWarnings
-            # routes warnings.warn() through logging.getLogger(
-            # "py.warnings") -- a different logger than
+            # Bridges Python's warnings module (numpy/scipy's RuntimeWarning
+            # etc. bypass logging by default) into the same log file.
+            # captureWarnings routes warnings.warn() through
+            # logging.getLogger("py.warnings"), a different logger than
             # "he6_cres_spec_sims" above, so it needs the same handler
-            # attached separately (reusing the same Handler instance
-            # rather than opening a second one on the same path).
-            # Restored via warnings.showwarning directly, not
-            # captureWarnings(False), since that would unconditionally
-            # turn capturing off even if something else in this process
-            # had already enabled it before this call. This logger's own
-            # level (not just its handler) is set explicitly to DEBUG,
-            # unlike he6_logger above: captured warnings don't have a
-            # meaningful INFO-vs-DEBUG distinction the way application
-            # log calls do, and the goal here is simply that none of them
-            # get silently dropped by this logger's own level filter --
-            # a narrower, different concern from general verbosity
-            # control, so it stays local to this function rather than
-            # moving to root-level config too.
+            # attached separately. Restored via warnings.showwarning
+            # directly rather than captureWarnings(False), which would turn
+            # capturing off unconditionally even if something else in this
+            # process already enabled it. This logger's level is set
+            # explicitly to DEBUG since captured warnings have no
+            # meaningful INFO-vs-DEBUG distinction; the goal is only that
+            # none get dropped by its level filter, a narrower concern
+            # than the general verbosity control at root.
             warnings_logger = logging.getLogger("py.warnings")
             warnings_logger.addHandler(handler)
             prev_warnings_level = warnings_logger.level
@@ -431,17 +401,14 @@ def make_run_specsims(
 
 
 def delete_specsims_output(task_dir: Path) -> None:
-    """Deletes the .speck files (and their containing spec_files/
-    directory), no longer needed once Katydid has consumed them. Only ever
-    runs after katydid_done in STEPS's own fixed order.
+    """Deletes the .speck files and their containing spec_files/ directory,
+    once Katydid has consumed them. Runs after katydid_done.
 
     Also removes the specsims/ directory itself if it's now empty: by this
-    point mc_truth_deleted has already removed bands.csv/dmtracks.csv (see
-    STEPS's own order -- mc_truth_deleted runs well before this), so this
-    step's own spec_files/ removal is normally what leaves specsims/
+    point mc_truth_deleted has already removed bands.csv/dmtracks.csv, so
+    this step's spec_files/ removal is normally what leaves specsims/
     empty. rmdir only succeeds on a genuinely empty directory, so this is
-    a no-op (not an error) if specsims.yaml's own output ever produces
-    anything else there that isn't part of this cleanup.
+    a no-op if specsims.yaml's output produces anything else there.
     """
     specsims_dir = task_dir / SPECSIMS_OUTPUT_DIRNAME
     spec_files_dir = specsims_dir / "spec_files"
@@ -455,16 +422,20 @@ def delete_specsims_output(task_dir: Path) -> None:
     logger.info("specsims_output_deleted: spec_files/ (specsims/ dir also removed: %s)", dir_removed)
 
 
-def build_katydid_command_for_task(task_dir: Path, katydid_path: str, katydid_config: str, noise_paths: list[str]) -> list[str]:
+def build_katydid_command_for_task(
+    *, task_dir: Path, katydid_path: str, katydid_config: str, noise_paths: list[str]
+) -> list[str]:
     """Builds the Katydid command line for this task: renders a copy of katydid_config with
-    set-field set to this task's true_field (see render_katydid_config), then builds the full
-    command against the two .speck files this task's specsims run produced.
+    set-field set to this task's true_field, then builds the full command against the two
+    .speck files this task's specsims run produced.
     """
     identity = _task_identity(task_dir)
     true_field = identity.true_field
 
     rendered_katydid_config_path = task_dir / "katydid_config.yaml"
-    render_katydid_config(katydid_config, true_field, rendered_katydid_config_path)
+    render_katydid_config(
+        base_config_path=katydid_config, true_field=true_field, output_path=rendered_katydid_config_path
+    )
 
     spec_files_dir = task_dir / SPECSIMS_OUTPUT_DIRNAME / "spec_files"
     speck_paths = sorted(spec_files_dir.glob("*.speck"))
@@ -505,26 +476,24 @@ def build_katydid_command_for_task(task_dir: Path, katydid_path: str, katydid_co
 
 def make_run_katydid(katydid_config: str, noise_paths: list[str]) -> Callable[[Path], None]:
     """Builds the run_katydid step function for one stage-1 run, capturing
-    katydid_config/noise_paths via closure, for the same reason as
-    make_run_specsims above.
+    katydid_config/noise_paths via closure, since a step function takes
+    only task_dir.
 
-    Katydid's own stdout/stderr (its own C++ logging -- factory
-    registrations, its own welcome banner, PROG/WARN lines, etc.) is
-    piped to its own log file (KATYDID_LOG_FILENAME, separate from
-    SPECSIMS_LOG_FILENAME/specsims.log -- a different step's output, and
-    make_run_specsims's own log file is opened in "w" mode, so sharing
-    one file would risk one step's output clobbering the other's) rather
-    than inherited from the parent process, the same way use_ghcss's own
-    subprocess branch in make_run_specsims already does -- without this,
-    it goes straight to the console, the only mechanism available for a
-    subprocess regardless of what it does internally.
+    Katydid's stdout/stderr (its C++ logging -- factory registrations,
+    welcome banner, PROG/WARN lines, etc.) is piped to a log file
+    (KATYDID_LOG_FILENAME, a different step's output from
+    SPECSIMS_LOG_FILENAME, each opened in "w" mode) rather than inherited
+    from the parent process, which would otherwise send it straight to the
+    console.
     """
 
     def fn(task_dir: Path) -> None:
         katydid_path = resolve_katydid_path()
-        command = build_katydid_command_for_task(task_dir, katydid_path, katydid_config, noise_paths)
+        command = build_katydid_command_for_task(
+            task_dir=task_dir, katydid_path=katydid_path, katydid_config=katydid_config, noise_paths=noise_paths
+        )
         log_path = task_dir / KATYDID_LOG_FILENAME
-        logger.info("katydid starting, own log -> %s", log_path)
+        logger.info("katydid starting, log -> %s", log_path)
         with open(log_path, "w", buffering=1) as log_file:
             subprocess.run(command, check=True, stdout=log_file, stderr=subprocess.STDOUT)
         logger.info("katydid complete")
@@ -536,21 +505,18 @@ def run_events_proto_conversion(task_dir: Path) -> None:
     """track.root -> EventList -> events.pb.zst, reading the .root file
     directly via uproot.
 
-    Reads from f["MB-events"]["MultiBandEvent"]["fTracks"] -- see
-    event.proto's doc comment on why this is named Event, not Track.
-    "MultiBandEvent"/"fTracks" are nested sub-branches *within* the
-    "MB-events" tree, not a slash-joined top-level tree path. The
-    separate, standalone "tracks" tree (Katydid's WriteLongTrack
-    output) holds pre-event-building long-track candidates, a genuinely
-    different dataset from the post-event-building tracks kept in each
-    MultiBandEvent (see point.proto's Point message for that separate
-    tree's data).
+    Reads from f["MB-events"]["MultiBandEvent"]["fTracks"]. "MultiBandEvent"
+    and "fTracks" are nested sub-branches *within* the "MB-events" tree, not
+    a slash-joined top-level tree path. The separate, standalone "tracks"
+    tree (Katydid's WriteLongTrack output) holds pre-event-building
+    long-track candidates, a dataset distinct from the post-event-building
+    tracks kept in each MultiBandEvent.
 
     Each scalar per-track branch is named "fTracks.f<Name>" (e.g.
     "fTracks.fTrackId"); branch_to_field's keys are already the
     stripped form ("TrackId"). The nested, jagged fPoints sub-array
-    (per-point data within each track -- a separate, more granular
-    dataset) is skipped via its AsObjects interpretation.
+    (per-point data within each track) is skipped via its AsObjects
+    interpretation.
 
     Flattening uses np.concatenate over each field's per-event jagged
     sub-arrays (bulk numpy, no pandas).
@@ -558,9 +524,8 @@ def run_events_proto_conversion(task_dir: Path) -> None:
     ROOT branch names are PascalCase (TrackId, BandNumber, ...) while Event's proto field names
     are snake_case (track_id, band_number, ...), so this needs an explicit name mapping rather
     than a positional or same-name correspondence. UniqueID/Bits (ROOT's TObject bookkeeping,
-    not Katydid data -- see event.proto's doc comment) are simply not in this mapping, so
-    they're dropped by omission -- along with fPoints, they're the only
-    branches this leaves unread.
+    not Katydid data) aren't in this mapping, so they're dropped by omission -- along with
+    fPoints, they're the only branches this leaves unread.
     """
     branch_to_field = {
         "TrackId": "track_id",
@@ -633,18 +598,21 @@ def run_points_proto_conversion(task_dir: Path) -> None:
     """track.root -> PointList -> points.pb.zst, reading the .root file
     directly via uproot.
 
-    Reads from the standalone "tracks" tree (KATYDID_TRACKS_TREE_NAME) -- Katydid's
-    WriteLongTrack output, a tree separate from the post-event-building tracks kept in each
-    event (see point.proto's doc comment on the distinction) -- specifically the nested
-    Track/fPoints/f* branches (Point's per-point member fields, TClonesArray-nested within each
-    TLongTrackData entry). uproot's key format here uses a "/" for structural sub-branch nesting
-    (Track/fPoints/...) and a "." for the innermost, dotted C++ member name (...fPoints.f<Name>).
+    Reads from the standalone "tracks" tree (KATYDID_TRACKS_TREE_NAME) --
+    Katydid's WriteLongTrack output, a tree separate from the
+    post-event-building tracks kept in each event -- specifically the
+    nested Track/fPoints/f* branches (Point's per-point member fields,
+    TClonesArray-nested within each TLongTrackData entry). uproot's key
+    format here uses a "/" for structural sub-branch nesting
+    (Track/fPoints/...) and a "." for the innermost, dotted C++ member
+    name (...fPoints.f<Name>).
 
-    track_id is the real TrackId field, not a synthetic per-file index -- see point.proto's doc
-    comment for why that's correct for this pipeline's one-acquisition-per-task architecture.
+    track_id is the real TrackId field, not a synthetic per-file index:
+    this pipeline runs one acquisition per task, so TrackId is already
+    unique within this output.
 
-    Flattening uses np.concatenate over each field's per-event jagged sub-arrays (bulk numpy, no
-    pandas).
+    Flattening uses np.concatenate over each field's per-event jagged
+    sub-arrays (bulk numpy, no pandas).
     """
     branch_to_field = {
         "TrackId": "track_id",
@@ -709,10 +677,9 @@ def run_slew_proto_conversion(task_dir: Path) -> None:
 
 
 def delete_katydid_output(task_dir: Path) -> None:
-    """Deletes track.root and slew_times.txt. Only ever runs after
-    events_proto_done, points_proto_done, and slew_proto_done in STEPS's
-    own fixed order. missing_ok=True for the same reason as
-    _delete_uncompressed_log."""
+    """Deletes track.root and slew_times.txt. Runs after events_proto_done,
+    points_proto_done, and slew_proto_done complete. missing_ok=True
+    tolerates an already-deleted file."""
     (task_dir / ROOT_FILENAME).unlink(missing_ok=True)
     (task_dir / SLEW_TIMES_FILENAME).unlink(missing_ok=True)
     logger.info("katydid_output_deleted: track.root, slew_times.txt")
@@ -729,7 +696,7 @@ def _not_implemented_without_factory(step_name: str, factory_name: str):
     return fn
 
 
-# Matches stage1_state.STEPS's own order exactly -- see that module.
+# Keys are the stage-1 step names, in the order they run.
 STEP_FNS = {
     "specsims_done": _not_implemented_without_factory("specsims_done", "make_run_specsims"),
     "specsims_log_compressed": compress_specsims_log,

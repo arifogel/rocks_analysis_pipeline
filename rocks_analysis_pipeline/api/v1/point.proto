@@ -6,31 +6,28 @@ import "rocks_analysis_pipeline/api/v1/task_identity.proto";
 
 option go_package = "github.com/Helium6CRES/rocks_analysis_pipeline/api/v1";
 
-// Point matches one raw track point, read directly from Katydid's own
-// .root output -- specifically the standalone "tracks" tree (the Point
-// struct nested inside TLongTrackData, Source/IO/Conversions/
-// KTROOTData.hh), a different ROOT tree entirely from event.proto's own
-// "MB-events" (see that file's own doc comment on the naming distinction).
-// Field types here match the real ROOT branch types (UInt_t/Int_t/
-// Double_t), verified directly against Katydid's own C++ source.
+// Point matches one raw track point, read directly from Katydid's .root
+// output -- specifically the standalone "tracks" tree (the Point struct
+// nested inside TLongTrackData, Source/IO/Conversions/KTROOTData.hh), a
+// different ROOT tree from the "MB-events" tree multi-band-event data is
+// read from. Field types here match the real ROOT branch types
+// (UInt_t/Int_t/Double_t).
 //
 // track_id is the real TrackId field, not a synthetic per-file index:
-// Katydid's own long-track-finder assigns it via a simple, monotonically
-// incrementing counter (fNTracks) on the clustering processor itself,
-// reset only when a fresh process starts. Since this pipeline's own
-// stage 1 runs Katydid exactly once per task -- one task, one acquisition,
-// one fresh process (see task_identity.proto's own doc comment on why
-// acquisition is fixed at 0) -- that counter is always dense and 0-starting
-// within one task's own output, so track_id only needs
-// (task.subrun_id, task.field_index, track_id) to uniquely identify a
-// track, the same shape every other identity in this pipeline already
-// uses. (The old CSV-based pipeline could bundle multiple acquisitions
-// into one Katydid process -- see local_ssa_katydid.py's own
-// --parallelize-acquisitions flag -- under which a single .root file's own
-// track_id values could start from a nonzero offset; not a concern here.)
+// Katydid's long-track-finder assigns it via a monotonically incrementing
+// counter (fNTracks) on the clustering processor, reset only when a
+// fresh process starts. Stage 1 runs Katydid exactly once per task --
+// one task, one acquisition, one fresh process -- so that counter is
+// always dense and 0-starting within one task's output, and track_id
+// only needs (task.subrun_id, task.field_index, track_id) to uniquely
+// identify a track, the same shape every other identity in this
+// pipeline uses. (A Katydid process that bundles multiple acquisitions
+// into one run can start a single .root file's track_id values from a
+// nonzero offset; not a concern here, since each task is one
+// acquisition.)
 //
-// UniqueID and Bits (ROOT's own TObject bookkeeping, not Katydid data) are
-// omitted, for the same reason as event.proto's own Event message.
+// UniqueID and Bits (ROOT's TObject bookkeeping, not Katydid data) are
+// omitted, for the same reason as the multi-band event data.
 message Point {
   uint32 track_id = 1;
   uint32 event_id = 2;
@@ -48,18 +45,16 @@ message Point {
   double track_finder_local_slope = 14;
 }
 
-// PointList is stage 1's own points_proto_done output: every Point from
-// one task's Katydid .root file, plus the TaskIdentity every one of those
-// points shares (see task_identity.proto's own doc comment for why it
-// lives here and not on each Point).
+// PointList is stage 1's points_proto_done output: every Point from one
+// task's Katydid .root file, plus the TaskIdentity those points share.
 message PointList {
   TaskIdentity task = 1;
   repeated Point points = 2;
 }
 
-// PointLists is stage 2's own merge-step output: every task's own
-// PointList for one run, gathered as-is (not flattened -- see BandLists's
-// own doc comment in band.proto for the full reasoning, identical here).
+// PointLists is stage 2's merge-step output: every task's PointList for
+// one run, gathered as-is; nothing is flattened, so each entry keeps its
+// TaskIdentity and no per-row identity needs duplicating.
 message PointLists {
   repeated PointList point_lists = 1;
 }

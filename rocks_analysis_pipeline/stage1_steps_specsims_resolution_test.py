@@ -4,9 +4,6 @@ runfiles (see stage1_steps.py's resolve_specsims_path()), without running any re
 simulation -- this is meant to be cheap and fast (`bazel test`), specifically to catch a
 wrong or stale runfiles path (e.g. after a canonical repo name change, or a go_binary
 target rename) before committing to a real, potentially long-running specsims run.
-
-Mirrors cresproc's own threshold_search_contam_resolution_test.py (resolve_contam_path),
-the established pattern for this exact kind of test in this project.
 """
 
 from __future__ import annotations
@@ -17,15 +14,12 @@ from pathlib import Path
 
 from rocks_analysis_pipeline.stage1_steps import resolve_specsims_path
 
-# specsims has no dedicated --help output to check against (Go's flag package's own -h/
-# --help behavior isn't relied on here, to avoid assuming something about it that hasn't
-# been verified directly). Instead, this runs specsims with no arguments at all: main.go
-# prints this exact usage message to stderr and exits 2 whenever --config is missing --
-# confirmed directly against ghcss's own cmd/specsims/main.go, not assumed. Checking for
-# this exact, distinctive text (and the exit code main.go's own exitCodeProfilingStopped
-# doc comment establishes as deliberately meaningful, not incidental) is what confirms the
-# resolved path is actually specsims, not some other stale or unrelated executable that
-# happens to exist there.
+# specsims has no dedicated --help output to check against. Instead, this runs specsims
+# with no arguments at all: main.go prints this exact usage message to stderr and exits 2
+# whenever --config is missing. Checking for this exact, distinctive text (and the exit
+# code, which main.go's exitCodeProfilingStopped doc comment establishes as deliberately
+# meaningful, not incidental) is what confirms the resolved path is actually specsims, not
+# some other stale or unrelated executable that happens to exist there.
 _EXPECTED_USAGE_TEXT = "usage: specsims --config"
 _EXPECTED_EXIT_CODE = 2
 

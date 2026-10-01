@@ -1,28 +1,23 @@
 #!/usr/bin/env python3
 """
-Config generation for spec-sims subruns, duplicated out of run_spec_sims.py /
-he6_cres_spec_sims.experiment.Experiment without importing he6_cres_spec_sims
-at all.
+Config generation for spec-sims subruns, without importing
+he6_cres_spec_sims at all.
 
-Why this file exists rather than editing run_spec_sims.py: that file (and the
-he6_cres_spec_sims.experiment.Experiment class it calls into) also knows how
-to *run* simulations (Experiment.run_sims -> Simulation.run_full()), which is
-exactly the code path this project is moving off of in favor of ghcss. Rather
-than carve that dead path out of run_spec_sims.py (or leave a he6_cres_spec_sims
-import sitting unused at module load time -- he6_cres_spec_sims transitively
-imports numpy/scipy, so importing it costs real startup time and requires it
-to be installed even though nothing here calls into it), this file duplicates
-only the config-generation logic that local_spec_sims.py's
-generate_configs_only=True call path actually used:
-Experiment.create_configs_for_experiment, Experiment.create_experiment_config_file,
-and the get_experiment_dir/get_config_paths helpers -- verbatim in behavior,
-translated 1:1 from he6_cres_spec_sims/experiment.py as it stood when this was
-written. run_spec_sims.py itself is untouched; only local_spec_sims.py's
-import of RunSpecSims changes, to RunSpecSimsGhcss from this file.
+he6_cres_spec_sims.experiment.Experiment also knows how to *run*
+simulations (Experiment.run_sims -> Simulation.run_full()), a code path
+this repo runs via ghcss instead. Importing he6_cres_spec_sims
+transitively pulls in numpy/scipy, costing real startup time and
+requiring them installed even though nothing here calls into them, so
+this file duplicates only the config-generation logic that
+local_spec_sims.py's generate_configs_only=True call path uses --
+Experiment.create_configs_for_experiment,
+Experiment.create_experiment_config_file, and the
+get_experiment_dir/get_config_paths helpers -- translated 1:1 from
+he6_cres_spec_sims/experiment.py.
 
 generate_configs_only is kept as a parameter on .run() (always True, since
 this file never runs simulations) rather than dropped entirely, so
-local_spec_sims.py's own call site doesn't need to change beyond the import
+local_spec_sims.py's call site doesn't need to change beyond the import
 line -- keeping this a drop-in replacement for that one call.
 """
 
@@ -63,7 +58,8 @@ def _leading_int_sort_key(path: Path) -> tuple:
 
 
 def get_experiment_dir(experiment_params: dict) -> Path:
-    """Verbatim from he6_cres_spec_sims.experiment.get_experiment_dir."""
+    """Returns experiment_params["output_path"] if present, else
+    base_config_path's parent directory joined with experiment_name."""
     if "output_path" in experiment_params:
         return Path(experiment_params["output_path"])
     base_config_path = Path(experiment_params["base_config_path"])
@@ -74,7 +70,11 @@ def get_experiment_dir(experiment_params: dict) -> Path:
 
 
 def get_config_paths(experiment_params: dict) -> List[Path]:
-    """Verbatim from he6_cres_spec_sims.experiment.get_config_paths."""
+    """Globs every "*T.yaml" config file under this experiment's directory
+    (get_experiment_dir), excluding notebook-checkpoint paths, sorted by
+    each file's leading integer index (see _leading_int_sort_key). Raises
+    ValueError if none are found.
+    """
     experiment_dir = get_experiment_dir(experiment_params)
 
     suffix = "T.yaml"
@@ -93,10 +93,10 @@ def get_config_paths(experiment_params: dict) -> List[Path]:
             )
         )
 
-    # Sorted by each file's own leading integer index (0, 1, 2, ..., not
+    # Sorted by each file's leading integer index (0, 1, 2, ..., not
     # lexicographic string order) so the returned list is in the same order
     # the fields/traps arrays were generated in -- see _leading_int_sort_key's
-    # own doc comment for why this isn't natsort.
+    # doc comment for why this isn't natsort.
     config_paths = sorted(config_paths, key=_leading_int_sort_key)
 
     return config_paths
@@ -165,13 +165,12 @@ class RunSpecSimsGhcss:
         return get_config_paths(run_params)
 
     def _create_configs_for_experiment(self, experiment_params: dict, config_dict: dict) -> None:
-        """Verbatim from Experiment.create_configs_for_experiment, with
-        self.config_dict (which that method reads for the "already have a
-        parsed dict, don't reopen the file" branch) always available here
-        since local_spec_sims.py always passes a yaml_dict through
-        RunSpecSims's own equivalent __init__ path -- so the "config_dict is
-        None, reopen the file" branch that method also has is dropped as
-        dead code for this call path, not ported.
+        """Writes one rendered config file per (seed, field, trap) triple
+        under experiment_dir, copying base_config_path and overwriting its
+        rand_seed/events_to_simulate/betas_to_simulate/main_field/
+        trap_current keys. config_dict is always a parsed dict here (the
+        caller always passes one through), so there's no "reopen the
+        file" fallback.
         """
         base_config_path = Path(experiment_params["base_config_path"])
         experiment_dir = get_experiment_dir(experiment_params)
@@ -212,7 +211,8 @@ class RunSpecSimsGhcss:
                 yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False)
 
     def _create_experiment_config_file(self, experiment_params: dict) -> None:
-        """Verbatim from Experiment.create_experiment_config_file."""
+        """Writes experiment_params to
+        <experiment_dir>/<experiment_name>_exp.yaml."""
         experiment_dir = get_experiment_dir(experiment_params)
         experiment_config = experiment_dir / (experiment_params["experiment_name"] + "_exp.yaml")
 
