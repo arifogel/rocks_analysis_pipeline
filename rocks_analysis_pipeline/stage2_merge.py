@@ -1,7 +1,14 @@
-"""Stage 2: merges every stage-1 task's own bands/dmtracks/events/points
-proto output for one run into a single, per-run BandLists/DMTrackLists/
-EventLists/PointLists file each -- runs_dir/run_name/{bands,dmtracks,events,
+"""Stage 2: merges stage-1 task output into per-run BandLists/DMTrackLists/
+EventLists/PointLists files -- runs_dir/run_name/{bands,dmtracks,events,
 points}.pb.zst, sibling to that run's own subrun_*/ directories.
+
+run_stage2_merge's chunk=None default merges every task directory the run
+has into one unsuffixed set of those four files. Passing a ChunkScope
+instead merges only that chunk's own task directories, into the same four
+filenames with -<chunk index> inserted before their extensions -- see
+ChunkScope's and run_stage2_merge's own doc comments. wulf_ssa.py uses this
+to bound each reduce job's own output and memory footprint to one map
+array's worth of tasks; local_ssa.py's own usage never chunks.
 
 Deliberately a merge, not a flatten: each task's own BandList/DMTrackList/
 EventList/PointList (already carrying its own TaskIdentity -- see
@@ -33,11 +40,12 @@ output already exists on disk.
 
 import logging
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import Callable, NamedTuple, TypeVar
 
 import compression.zstd as zstd
 
 from rocks_analysis_pipeline.api.v1 import band_pb2, dmtrack_pb2, event_pb2, point_pb2
+from rocks_analysis_pipeline.stage1_state import parse_task_dir
 from rocks_analysis_pipeline.stage1_steps import (
     BANDS_PROTO_FILENAME,
     DMTRACKS_PROTO_FILENAME,
@@ -50,19 +58,67 @@ logger = logging.getLogger(__name__)
 ListMessage = TypeVar("ListMessage")
 
 
-def find_task_dirs(runs_dir: Path, run_name: str) -> list[Path]:
-    """Every stage-1 task directory that actually exists for this run --
-    matches stage1_state.task_dir's own path convention
-    (runs_dir/run_name/subrun_<id>/field_<index>), discovered by globbing
-    rather than computed from an expected count, so this merges whatever
-    stage 1 actually produced (matching local_ssa_post_processing.py's own
-    glob-based discovery, not stage1's own explicit range(num_subruns)/
-    range(num_fields) computation -- there's no equivalent here of
-    json_config's own fields_T to compute an expected count from, and glob
-    discovery is what lets this run standalone against partial or
-    already-cleaned-up runs).
+class ChunkScope(NamedTuple):
+    """One reduce chunk's slice of a run: its 0-based position among the
+    run's chunks, and the (uniform, run-wide) max tasks per chunk -- the
+    same two values wulf_ssa.py's own --chunk-size chunking uses, so a
+    chunk's own identity never depends on anything else about the run
+    (how many chunks it has, how many tasks the last one happens to get).
     """
-    return sorted((runs_dir / run_name).glob("subrun_*/field_*"))
+
+    chunk_index: int
+    chunk_size: int
+
+
+def _chunked_filename(filename: str, chunk: ChunkScope) -> str:
+    """filename with -<chunk index> inserted before every extension
+    (bands.pb.zst -> bands-0.pb.zst), unpadded -- nothing here needs to
+    know how many chunks the run has in total.
+    """
+    stem, _, ext = filename.partition(".")
+    return f"{stem}-{chunk.chunk_index}.{ext}"
+
+
+def _all_task_dirs(runs_dir: Path, run_name: str) -> list[Path]:
+    """Every stage-1 task directory for this run, in the same order
+    wulf_ssa.py's own flat job_id = subrun_id * num_fields + field_index
+    enumeration produces -- sorted numerically by (subrun_id, field_index),
+    not lexicographically by path string (subrun_10 would otherwise sort
+    before subrun_2). Discovered by globbing rather than computed from an
+    expected count, so this merges whatever stage 1 actually produced
+    (matching local_ssa_post_processing.py's own glob-based discovery, not
+    stage1's own explicit range(num_subruns)/range(num_fields) computation
+    -- there's no equivalent here of json_config's own fields_T to compute
+    an expected count from, and glob discovery is what lets this run
+    standalone against partial or already-cleaned-up runs).
+    """
+    dirs = (runs_dir / run_name).glob("subrun_*/field_*")
+    return sorted(dirs, key=lambda d: parse_task_dir(d)[1:])
+
+
+def find_task_dirs(runs_dir: Path, run_name: str, chunk: ChunkScope | None = None) -> list[Path]:
+    """Every stage-1 task directory for this run (chunk=None), or just one
+    chunk's own slice of them (chunk=<a ChunkScope>): position
+    [chunk_index*chunk_size : chunk_index*chunk_size+chunk_size] of
+    _all_task_dirs's own order.
+
+    Safe without knowing num_fields, or the run's true total task count,
+    because run_stage1_task's own task_dir.mkdir happens unconditionally as
+    its very first action, before any step runs -- so by the time a chunk's
+    reduce job starts (--dependency=afterany on that chunk's whole map
+    array), every task dispatched to that array has its directory on disk,
+    whether or not the task itself succeeded. Slicing _all_task_dirs's
+    actual, already-on-disk list this way lands on exactly the same set
+    job_id arithmetic would have, without computing it -- and the last
+    chunk's slice simply comes up short against the list's real length,
+    rather than needing the true total task count as a separate input to
+    avoid overshooting it.
+    """
+    all_dirs = _all_task_dirs(runs_dir, run_name)
+    if chunk is None:
+        return all_dirs
+    start = chunk.chunk_index * chunk.chunk_size
+    return all_dirs[start : start + chunk.chunk_size]
 
 
 def _read_proto_zst(message_cls: Callable[[], ListMessage], path: Path) -> ListMessage:
@@ -156,11 +212,16 @@ def merge_points(task_dirs: list[Path]) -> point_pb2.PointLists:
     return _merge_one_type(task_dirs, POINTS_PROTO_FILENAME, point_pb2.PointList, point_pb2.PointLists, "point_lists")
 
 
-def run_stage2_merge(runs_dir: Path, run_name: str, allow_missing: bool = False) -> None:
-    """The actual stage-2 step: merges bands/dmtracks/events/points for
-    one run and writes each to runs_dir/run_name/<same filename as the
-    per-task one>, sibling to that run's own subrun_*/ directories (per
-    direct instruction on the output path convention).
+def run_stage2_merge(
+    runs_dir: Path, run_name: str, allow_missing: bool = False, chunk: ChunkScope | None = None
+) -> None:
+    """The actual stage-2 step: merges bands/dmtracks/events/points and
+    writes each to runs_dir/run_name/<same filename as the per-task one>,
+    sibling to that run's own subrun_*/ directories (per direct instruction
+    on the output path convention) -- or, with chunk given, merges only
+    that chunk's own task directories into the same four filenames, each
+    with -<chunk index> inserted before its extension (see find_task_dirs's
+    and _chunked_filename's own doc comments).
 
     allow_missing=False (the default): refuses to write anything at all
     if any task directory is missing any of the four expected files --
@@ -170,7 +231,7 @@ def run_stage2_merge(runs_dir: Path, run_name: str, allow_missing: bool = False)
     skip logic already does this; the only thing that changes here is
     whether check_all_files_present runs first to rule it out entirely.
     """
-    task_dirs = find_task_dirs(runs_dir, run_name)
+    task_dirs = find_task_dirs(runs_dir, run_name, chunk)
     if not task_dirs:
         raise RuntimeError(f"No stage-1 task directories found under {runs_dir / run_name}/subrun_*/field_*")
     logger.info("stage2 merge: found %d task dir(s) under %s", len(task_dirs), runs_dir / run_name)
@@ -180,20 +241,25 @@ def run_stage2_merge(runs_dir: Path, run_name: str, allow_missing: bool = False)
 
     run_dir = runs_dir / run_name
 
+    def out_path(filename: str) -> Path:
+        return run_dir / (filename if chunk is None else _chunked_filename(filename, chunk))
+
     merged_bands = merge_bands(task_dirs)
-    _write_proto_zst(merged_bands, run_dir / BANDS_PROTO_FILENAME)
-    logger.info("wrote %s: %d task(s) merged", run_dir / BANDS_PROTO_FILENAME, len(merged_bands.band_lists))
+    bands_path = out_path(BANDS_PROTO_FILENAME)
+    _write_proto_zst(merged_bands, bands_path)
+    logger.info("wrote %s: %d task(s) merged", bands_path, len(merged_bands.band_lists))
 
     merged_dmtracks = merge_dmtracks(task_dirs)
-    _write_proto_zst(merged_dmtracks, run_dir / DMTRACKS_PROTO_FILENAME)
-    logger.info(
-        "wrote %s: %d task(s) merged", run_dir / DMTRACKS_PROTO_FILENAME, len(merged_dmtracks.dmtrack_lists)
-    )
+    dmtracks_path = out_path(DMTRACKS_PROTO_FILENAME)
+    _write_proto_zst(merged_dmtracks, dmtracks_path)
+    logger.info("wrote %s: %d task(s) merged", dmtracks_path, len(merged_dmtracks.dmtrack_lists))
 
     merged_events = merge_events(task_dirs)
-    _write_proto_zst(merged_events, run_dir / EVENTS_PROTO_FILENAME)
-    logger.info("wrote %s: %d task(s) merged", run_dir / EVENTS_PROTO_FILENAME, len(merged_events.event_lists))
+    events_path = out_path(EVENTS_PROTO_FILENAME)
+    _write_proto_zst(merged_events, events_path)
+    logger.info("wrote %s: %d task(s) merged", events_path, len(merged_events.event_lists))
 
     merged_points = merge_points(task_dirs)
-    _write_proto_zst(merged_points, run_dir / POINTS_PROTO_FILENAME)
-    logger.info("wrote %s: %d task(s) merged", run_dir / POINTS_PROTO_FILENAME, len(merged_points.point_lists))
+    points_path = out_path(POINTS_PROTO_FILENAME)
+    _write_proto_zst(merged_points, points_path)
+    logger.info("wrote %s: %d task(s) merged", points_path, len(merged_points.point_lists))
