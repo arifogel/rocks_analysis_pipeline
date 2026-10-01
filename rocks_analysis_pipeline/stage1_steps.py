@@ -1,5 +1,5 @@
 """Concrete implementations of the stage-1 steps, one function per step.
-Each takes the task's own task_dir as its only argument and returns None.
+Each takes the task's task_dir as its only argument and returns None.
 
 specsims_done and katydid_done are the two exceptions: make_run_specsims and
 make_run_katydid are factories that build the real step closures, since
@@ -40,9 +40,9 @@ KATYDID_RLOCATION = "katydid+/release/katydid.sh"
 SPECSIMS_LOG_FILENAME = "specsims.log"
 COMPRESSED_SPECSIMS_LOG_FILENAME = SPECSIMS_LOG_FILENAME + ".zst"
 
-# specsims's own config and output layout within task_dir. Named
+# specsims's config and output layout within task_dir. Named
 # "specsims.yaml" (not e.g. "config.yaml") specifically so
-# Simulation.run_full()'s own config_path.stem-derived output directory
+# Simulation.run_full()'s config_path.stem-derived output directory
 # comes out as "specsims/", not the meaningless "config/" a differently-
 # named config file would produce.
 SPECSIMS_CONFIG_FILENAME = "specsims.yaml"
@@ -50,13 +50,13 @@ SPECSIMS_OUTPUT_DIRNAME = "specsims"
 BANDS_CSV_FILENAME = "bands.csv"
 DMTRACKS_CSV_FILENAME = "dmtracks.csv"
 
-# Katydid's own output layout within task_dir.
+# Katydid's output layout within task_dir.
 ROOT_FILENAME = "track.root"
 SLEW_TIMES_FILENAME = "slew_times.txt"
 KATYDID_LOG_FILENAME = "katydid.log"
 COMPRESSED_KATYDID_LOG_FILENAME = KATYDID_LOG_FILENAME + ".zst"
 
-# This module's own proto+zstd output layout within task_dir.
+# This module's proto+zstd output layout within task_dir.
 BANDS_PROTO_FILENAME = "bands.pb.zst"
 DMTRACKS_PROTO_FILENAME = "dmtracks.pb.zst"
 EVENTS_PROTO_FILENAME = "events.pb.zst"
@@ -302,7 +302,7 @@ def make_run_specsims(
     yaml_config/json_config/initial_seed/noise_paths via closure, since a
     step function takes only task_dir.
 
-    Renders this task's own specsims.yaml, then runs it. use_ghcss=False
+    Renders this task's specsims.yaml, then runs it. use_ghcss=False
     (the default) calls he6_cres_spec_sims.simulation.Simulation.run_full()
     directly. use_ghcss=True instead resolves and invokes the specsims Go
     binary as a subprocess: its measured throughput (35 MB/min vs.
@@ -326,8 +326,8 @@ def make_run_specsims(
     debug lines (one line fires ~146,500 times per acquisition)
     suppressed.
 
-    Also bridges the warnings module (numpy/scipy's own RuntimeWarning
-    etc., which bypass logging entirely by default) into the same log
+    Also bridges the warnings module (numpy/scipy's RuntimeWarning etc.,
+    which bypass logging entirely by default) into the same log
     file via logging.captureWarnings, scoped and restored the same way.
     """
 
@@ -340,7 +340,7 @@ def make_run_specsims(
             noise_paths=noise_paths,
         )
         log_path = task_dir / SPECSIMS_LOG_FILENAME
-        logger.info("specsims starting (use_ghcss=%s), own log -> %s", use_ghcss, log_path)
+        logger.info("specsims starting (use_ghcss=%s), log -> %s", use_ghcss, log_path)
 
         if use_ghcss:
             with open(log_path, "w", buffering=1) as log_file:
@@ -370,7 +370,7 @@ def make_run_specsims(
             # process already enabled it. This logger's level is set
             # explicitly to DEBUG since captured warnings have no
             # meaningful INFO-vs-DEBUG distinction; the goal is only that
-            # none get dropped by its own level filter, a narrower concern
+            # none get dropped by its level filter, a narrower concern
             # than the general verbosity control at root.
             warnings_logger = logging.getLogger("py.warnings")
             warnings_logger.addHandler(handler)
@@ -406,9 +406,9 @@ def delete_specsims_output(task_dir: Path) -> None:
 
     Also removes the specsims/ directory itself if it's now empty: by this
     point mc_truth_deleted has already removed bands.csv/dmtracks.csv, so
-    this step's own spec_files/ removal is normally what leaves specsims/
+    this step's spec_files/ removal is normally what leaves specsims/
     empty. rmdir only succeeds on a genuinely empty directory, so this is
-    a no-op if specsims.yaml's own output produces anything else there.
+    a no-op if specsims.yaml's output produces anything else there.
     """
     specsims_dir = task_dir / SPECSIMS_OUTPUT_DIRNAME
     spec_files_dir = specsims_dir / "spec_files"
@@ -479,8 +479,8 @@ def make_run_katydid(katydid_config: str, noise_paths: list[str]) -> Callable[[P
     katydid_config/noise_paths via closure, since a step function takes
     only task_dir.
 
-    Katydid's own stdout/stderr (its C++ logging -- factory registrations,
-    welcome banner, PROG/WARN lines, etc.) is piped to its own log file
+    Katydid's stdout/stderr (its C++ logging -- factory registrations,
+    welcome banner, PROG/WARN lines, etc.) is piped to a log file
     (KATYDID_LOG_FILENAME, a different step's output from
     SPECSIMS_LOG_FILENAME, each opened in "w" mode) rather than inherited
     from the parent process, which would otherwise send it straight to the
@@ -493,7 +493,7 @@ def make_run_katydid(katydid_config: str, noise_paths: list[str]) -> Callable[[P
             task_dir=task_dir, katydid_path=katydid_path, katydid_config=katydid_config, noise_paths=noise_paths
         )
         log_path = task_dir / KATYDID_LOG_FILENAME
-        logger.info("katydid starting, own log -> %s", log_path)
+        logger.info("katydid starting, log -> %s", log_path)
         with open(log_path, "w", buffering=1) as log_file:
             subprocess.run(command, check=True, stdout=log_file, stderr=subprocess.STDOUT)
         logger.info("katydid complete")
