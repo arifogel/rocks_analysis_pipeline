@@ -53,22 +53,24 @@ def parse_args() -> argparse.Namespace:
         "--chunk-job-id-start",
         type=int,
         default=None,
-        help="inclusive start of this chunk's job id range -- required alongside the other "
-        "--chunk-* flags, to merge only this chunk's own task directories",
+        help="First job id to merge, inclusive. Only merge this one chunk's task directories "
+        "instead of the whole run's. Must be given together with --chunk-job-id-end and "
+        "--chunk-num-fields.",
     )
     arg(
         "--chunk-job-id-end",
         type=int,
         default=None,
-        help="inclusive end of this chunk's job id range -- required alongside the other "
-        "--chunk-* flags",
+        help="Last job id to merge, inclusive. Must be given together with --chunk-job-id-start "
+        "and --chunk-num-fields.",
     )
     arg(
         "--chunk-num-fields",
         type=int,
         default=None,
-        help="num_fields value job ids were derived from (matching stage1_task.py's own --job-id/"
-        "--num-fields) -- required alongside the other --chunk-* flags",
+        help="Fields per subrun for this run, same value as stage1_task.py's own --num-fields. "
+        "Needed to work out which subrun and field a job id belongs to. Must be given together "
+        "with --chunk-job-id-start and --chunk-job-id-end.",
     )
 
     arg("--log-level", type=str, default="INFO", help="root log level -- see logging_setup.init_logging")
