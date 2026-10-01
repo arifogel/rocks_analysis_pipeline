@@ -179,12 +179,9 @@ def build_jobs_and_num_fields(args: argparse.Namespace) -> tuple[list[dict[str, 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
 class JobChunk:
-    """One chunk's slice of the full, global 0..num_jobs-1 task-id range:
-    global task ids offset..offset+chunk_size-1, submitted as that chunk's
-    array job with local indices 0..chunk_size-1. offset is each chunk's
-    global starting position, to be reapplied wherever a chunk's local
-    $SLURM_ARRAY_TASK_ID needs mapping back to its real, global task id,
-    and wherever its reduce job needs mapping back to its job id range.
+    """One chunk's slice of the global 0..num_jobs-1 task-id range: global
+    task ids offset..offset+chunk_size-1, submitted as an array job with
+    local indices 0..chunk_size-1.
     """
 
     offset: int
@@ -192,10 +189,9 @@ class JobChunk:
 
 
 def build_job_chunks(*, num_jobs: int, chunk_size_limit: int) -> list[JobChunk]:
-    """Splits the full, global 0..num_jobs-1 task-id range into consecutive
-    chunks of at most chunk_size_limit each, one per Slurm job array -- see
-    --chunk-size's help for why a single array can't just hold all of
-    num_jobs.
+    """Splits the global 0..num_jobs-1 task-id range into consecutive
+    chunks of at most chunk_size_limit each, one per Slurm job array
+    (bounded by the cluster's MaxArraySize).
     """
     chunks: list[JobChunk] = []
     offset = 0
