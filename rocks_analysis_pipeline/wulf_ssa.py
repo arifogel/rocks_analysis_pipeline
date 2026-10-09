@@ -108,9 +108,9 @@ def parse_args() -> argparse.Namespace:
     arg(
         "--max-concurrent",
         type=int,
-        default=100,
+        default=0,
         help="max simulation+analysis tasks running at once within each chunk's job array "
-        "(sbatch --array=...%%N)",
+        "(sbatch --array=...%%N); 0 means unrestricted",
     )
     arg("--merge-tlim", type=str, default="12:00:00", help="sbatch --time (HH:MM:SS) for the merge job")
     arg("--merge-mem-gb", type=int, default=20, help="sbatch --mem (GB) for the merge job")
