@@ -91,17 +91,29 @@ def parse_args() -> argparse.Namespace:
 
     arg("--use-ghcss", action="store_true", help="pass --use-ghcss through to every simulation+analysis task")
 
-    # --tlim is the only job-control flag exposed, with a default rather
-    # than being required. cpus-per-task/mem/concurrency limits aren't
-    # included here.
     arg(
         "--tlim",
         type=str,
-        default="48:00:00",
+        default="02:00:00",
         help="sbatch --time (HH:MM:SS) for each simulation+analysis task (applies per task, the same "
         "as any other Slurm array: not split across the array as a whole)",
     )
+    arg("--task-cpus", type=int, default=1, help="sbatch --cpus-per-task for each simulation+analysis task")
+    arg(
+        "--task-mem-gb",
+        type=int,
+        default=1,
+        help="sbatch --mem (GB) for each simulation+analysis task. Peak RSS of one task is about 0.4 GB.",
+    )
+    arg(
+        "--max-concurrent",
+        type=int,
+        default=100,
+        help="max simulation+analysis tasks running at once within each chunk's job array "
+        "(sbatch --array=...%%N)",
+    )
     arg("--merge-tlim", type=str, default="12:00:00", help="sbatch --time (HH:MM:SS) for the merge job")
+    arg("--merge-mem-gb", type=int, default=20, help="sbatch --mem (GB) for the merge job")
 
     arg(
         "--chunk-size",
@@ -320,6 +332,9 @@ def submit_map_chunk(
         tlim=args.tlim,
         log_path=log_path,
         array=chunk_size,
+        max_concurrent=args.max_concurrent,
+        cpus_per_task=args.task_cpus,
+        mem=args.task_mem_gb,
     )
     return proc.stdout.strip()
 
@@ -353,6 +368,7 @@ def submit_reduce_chunk(
         job_name=f"{args.run_name}_reduce_chunk{chunk_index}",
         tlim=args.merge_tlim,
         log_path=log_path,
+        mem=args.merge_mem_gb,
         dependency=f"afterany:{map_job_id}",
     )
     return proc.stdout.strip()
