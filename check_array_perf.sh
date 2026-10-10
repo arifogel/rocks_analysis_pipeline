@@ -87,7 +87,7 @@ if [ -z "$nodes" ]; then
 else
   tmp=$(mktemp -d)
   for node in $nodes; do
-    ssh -o BatchMode=yes -o ConnectTimeout=5 "$node" "$(declare -f probe); probe $window" >"$tmp/$node" 2>"$tmp/$node.err" &
+    ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$node" "$(declare -f probe); probe $window" >"$tmp/$node" 2>"$tmp/$node.err" &
   done
   wait
   {
