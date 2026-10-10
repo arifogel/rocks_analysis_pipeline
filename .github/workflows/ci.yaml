@@ -16,8 +16,13 @@ jobs:
         os: [ubuntu-24.04, macos-26]
         compilation_mode: [fastbuild]
         include:
-          # dbg (CLion's debug mode) and opt (production) exercise build-mode-specific
-          # behavior that fastbuild never does. Not platform-specific, so one OS covers both.
+          # dbg and opt get special-cased handling in the Bazel build (see katydid's
+          # tools/katydid_cc.bzl's STANDARD define and KTLogger's own NDEBUG/STANDARD-gated
+          # verbosity floor) that
+          # fastbuild alone never exercises - dbg is also specifically the mode CLion's
+          # Bazel plugin uses when debugging, and opt is what actual production runs use.
+          # One OS is enough to catch a regression in either; this logic is not
+          # platform-specific, so it isn't worth tripling the full OS matrix for it.
           - os: ubuntu-24.04
             compilation_mode: dbg
           - os: ubuntu-24.04
@@ -30,9 +35,22 @@ jobs:
       - name: Configure git for private repo access
         run: git config --global url."https://${{ secrets.READ_PRIVATE_CRES_REPOS }}@github.com/".insteadOf "https://github.com/"
 
-      # --- Linux: Boost, FFTW, and MatIO come from apt, which installs into locations the
-      # compiler already searches (see katydid's tools/ubuntu_libs.bzl). The .deb cache key
-      # rationale is in katydid's .github/workflows/ci.yaml.
+      # --- Linux: Boost, FFTW, and MatIO come from apt (which installs into locations the
+      # compiler already searches by default, so no further configuration is needed - see
+      # katydid's tools/ubuntu_libs.bzl).
+      #
+      # Caches just the downloaded .deb files, keyed directly on a hash of this file, rather
+      # than a third-party action (e.g. awalsh128/cache-apt-pkgs-action) that computes its own
+      # cache key internally from the package list: such an action's own key computation is
+      # opaque and can go stale silently -- GitHub Actions' own cache fallback mechanism ("the
+      # default branch cache is available to other branches") can then serve an outdated cache
+      # across branches with no error, a documented, repeatedly-reported problem for that
+      # specific action (e.g. awalsh128/cache-apt-pkgs-action#138, #56). This key is correct by
+      # construction instead, since it changes if and only if this file - which is the only
+      # place the package list lives - changes. `apt-get install` itself is fast and safe to
+      # run unconditionally even on a cache hit, since apt already skips re-downloading
+      # packages it finds in its local archive cache and skips reinstalling packages already
+      # at the requested version.
       - name: Cache downloaded .deb files (Linux)
         if: runner.os == 'Linux'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
@@ -53,12 +71,17 @@ jobs:
             libmatio-dev \
             libtbb12 \
             libblas3
-          # apt's root-owned lock and partial/ are unreadable by the runner user and fail the
-          # post-job cache save ("Permission denied"). Only the .deb files belong in the cache.
+          # lock and partial/ are apt's own root-owned runtime bookkeeping, not downloaded
+          # package files - the cache step above only wants the actual .deb files. Left in
+          # place, both are unreadable by the (non-root) runner user, and the post-job cache
+          # save step fails outright trying to archive them ("Permission denied"), taking the
+          # whole cache down with it rather than just skipping these two paths.
           sudo rm -f /var/cache/apt/archives/lock
           sudo rm -rf /var/cache/apt/archives/partial
 
-      # --- macOS: Boost, FFTW, and MatIO are large enough downloads to be worth caching.
+      # --- macOS: Homebrew is preinstalled on GitHub's runners, but Boost, FFTW, and MatIO
+      # are not, and are large enough downloads to be worth caching across CI runs even
+      # though each run starts from a fresh virtual machine.
       - name: Cache Homebrew downloads (macOS)
         if: runner.os == 'macOS'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
@@ -78,9 +101,12 @@ jobs:
           bazelisk-cache: true
           repository-cache: true
           disk-cache: true
-          # The ubuntu-24.04 variants would otherwise share one disk-cache key (scoped by
-          # platform/arch) and race to save it, so only one persists. This gives each
-          # compilation mode its own.
+          # Without this, all three ubuntu-24.04 variants (fastbuild/dbg/opt) compute an
+          # identical disk-cache key (setup-bazel's own cache key is scoped by platform/arch,
+          # not by anything specific to this workflow's matrix), and race to save to the same
+          # slot - not a correctness risk, since Bazel's disk cache is content-addressed
+          # internally, but only one of the three would actually persist between CI runs,
+          # non-deterministically. This gives each compilation mode its own cache namespace.
           cache-version: ${{ matrix.compilation_mode }}
 
       - name: Verify MODULE.bazel.lock is up to date and build everything
@@ -89,8 +115,7 @@ jobs:
       - name: Test everything
         run: bazel test -c ${{ matrix.compilation_mode }} //...
 
-  # A separate job: an empty `container:` in a matrix can fail workflow validation
-  # (https://github.com/actions/runner/issues/265).
+  # Container-based jobs:
   build-and-test-almalinux:
     name: Bazel Build (almalinux-9)
     runs-on: ubuntu-latest
@@ -101,17 +126,24 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      # keepcache=True below is needed for this cache to help: dnf deletes downloaded packages
-      # after install by default. Keyed on this file's hash, like the .deb cache above.
+      # keepcache=True below is needed for this cache to actually help: dnf deletes downloaded
+      # packages after a successful install by default. Keyed on a hash of this file (which is
+      # the only place the package list lives), matching "Cache downloaded .deb files (Linux)"
+      # in the Ubuntu job above: a static key would never refresh if the package list itself
+      # changed.
       - name: Cache dnf packages
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: /var/cache/dnf
           key: dnf-cache-almalinux9-${{ hashFiles('.github/workflows/ci.yaml') }}
 
-      # gcc-c++ and git (for fetching this repo's dependencies) are absent from the minimal
-      # image. Bazel fetches everything else from pinned AlmaLinux and EPEL archives (katydid's
-      # tools/almalinux_libs.bzl); cpio unpacks them, and rpm2cpio ships with the base image.
+      # AlmaLinux is a RHEL-family Linux distribution, using dnf rather than apt. gcc-c++ (a C++
+      # compiler) and git (which Bazel uses to fetch this repo's dependencies) are Bazel's
+      # own requirements, missing from this minimal container image by default. cpio unpacks the
+      # .rpm packages katydid's tools/almalinux_libs.bzl fetches; rpm2cpio ships with the base image as
+      # part of the `rpm` package. Bazel fetches Boost/FFTW/MatIO/TBB/xxhash/FreeType/GSL
+      # hermetically from AlmaLinux's and EPEL's pinned package archives
+      # (katydid's tools/almalinux_libs.bzl).
       - name: Install build tools (dnf)
         run: |
           dnf install -y --setopt=keepcache=True \
@@ -124,15 +156,19 @@ jobs:
       - name: Configure git for private repo access
         run: git config --global url."https://${{ secrets.READ_PRIVATE_CRES_REPOS }}@github.com/".insteadOf "https://github.com/"
 
-      # setup-bazel's Bazel installer is unreliable in this minimal image.
-      - name: Install Bazelisk directly
+      # bazel-contrib/setup-bazel's usual automatic Bazel installation does not reliably work
+      # inside this minimal container image, so Bazelisk (the tool that installs the correct
+      # Bazel version automatically) is installed directly here instead, using the standard
+      # installation method documented by the Bazel project itself.
+      - name: Install Bazelisk directly (works regardless of what setup-bazel's installer needs)
         run: |
           wget -q -O /usr/local/bin/bazel \
             https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64
           chmod +x /usr/local/bin/bazel
 
-      # Caches the Bazel binary Bazelisk downloads; setup-bazel's caching is unreliable in this
-      # container.
+      # Caches the actual Bazel release binary that Bazelisk downloads (much larger than
+      # Bazelisk itself), in case setup-bazel's own caching does not take effect reliably in
+      # this container the way it does on the native runners above.
       - name: Cache Bazelisk's downloaded Bazel binary
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
@@ -145,11 +181,12 @@ jobs:
           bazelisk-cache: true
           repository-cache: true
           disk-cache: true
-          # The container changes what executes, not what the runner reports, so this job's
-          # disk-cache key (scoped by platform/arch) collides with the ubuntu-24.04 jobs'.
-          # Cache keys are immutable once written, so a colliding save locks in whichever
-          # content lands first (~5 MB disk / ~0 MB repository, forcing a full recompile).
-          # cache-version gives this job its own slot.
+          # setup-bazel saves each cache type only once, ever, per exact key (its own
+          # upstream issue #171), and its post step runs on !cancelled(), not success()
+          # (its own PR #128) -- so a job that fails early, before doing much real work,
+          # can still permanently lock in a near-empty cache under that key, with no later,
+          # successful run able to overwrite it. cache-version below gives this job a key
+          # of its own to recover from that.
           cache-version: almalinux9
 
       - name: Verify MODULE.bazel.lock is up to date and build everything

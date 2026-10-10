@@ -24,9 +24,11 @@ jobs:
       - name: Configure git for private repo access
         run: git config --global url."https://${{ secrets.READ_PRIVATE_CRES_REPOS }}@github.com/".insteadOf "https://github.com/"
 
-      # Regenerating MODULE.bazel.lock evaluates every module extension declared in
-      # MODULE.bazel, including katydid's tools/ubuntu_libs.bzl, which needs Boost, FFTW,
-      # and MatIO present on this runner.
+      # Regenerating MODULE.bazel.lock requires evaluating every module extension declared in
+      # MODULE.bazel, including katydid's tools/ubuntu_libs.bzl - which requires Boost, FFTW, and MatIO
+      # to actually be present on this runner, the same as the main CI workflow's Ubuntu job.
+      # ROOT needs no equivalent provisioning: katydid's tools/root.bzl module extension fetches it
+      # directly from root.cern, regardless of what's on this runner.
       - name: Cache downloaded .deb files
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
