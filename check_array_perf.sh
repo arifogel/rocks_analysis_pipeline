@@ -4,6 +4,7 @@
 # Usage: check_array_perf.sh [-w SECONDS] [-s SINCE] [JOBID...]
 #   -w  sampling window per node (default 10)
 #   -n  max nodes to ssh to, chosen at random; 0 means all (default 3)
+#   -N  comma-separated nodes to probe instead of a random sample
 #   -s  sacct start time for finished tasks (default now-1days)
 #   JOBID  array job ids to look at (default: every job you are running)
 #
@@ -20,11 +21,13 @@ USER=${USER:-$(id -un)}
 
 window=10
 max_nodes=3
+pinned_nodes=
 since="now-1days"
-while getopts "w:n:s:" opt; do
+while getopts "w:n:N:s:" opt; do
   case $opt in
     w) window=$OPTARG ;;
     n) max_nodes=$OPTARG ;;
+    N) pinned_nodes=$OPTARG ;;
     s) since=$OPTARG ;;
     *) exit 2 ;;
   esac
@@ -83,7 +86,9 @@ else
 fi
 nodes=$(echo "$jobs" | awk 'NF {print $2}' | sort -u)
 total_nodes=$(echo "$nodes" | grep -c .)
-if [ "$max_nodes" -gt 0 ] && [ "$total_nodes" -gt "$max_nodes" ]; then
+if [ -n "$pinned_nodes" ]; then
+  nodes=$(echo "$pinned_nodes" | tr ',' '\n')
+elif [ "$max_nodes" -gt 0 ] && [ "$total_nodes" -gt "$max_nodes" ]; then
   nodes=$(echo "$nodes" | sort -R | head -n "$max_nodes")
 fi
 
