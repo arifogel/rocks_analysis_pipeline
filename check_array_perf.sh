@@ -14,7 +14,7 @@
 # low, FDS changing, which means the file is being reopened.
 # A running job missing from the table either is not in a specsims/Katydid step or
 # reopens its files between samples.
-# Part 2 summarizes finished tasks from sacct.
+# Part 2 counts your jobs by Slurm state from sacct and summarizes the completed ones.
 
 set -uo pipefail
 USER=${USER:-$(id -un)}
@@ -113,12 +113,13 @@ else
 fi
 
 echo
-echo "== Finished tasks (sacct since $since) =="
+echo "== Jobs by Slurm state (sacct since $since) =="
 if [ $# -gt 0 ]; then
-  acct=$(sacct -n -P -X -j "$(IFS=,; echo "$*")" -s CD,TO -o State,Elapsed,TotalCPU,AllocCPUS)
+  acct=$(sacct -n -P -X -j "$(IFS=,; echo "$*")" -o State,Elapsed,TotalCPU,AllocCPUS)
 else
-  acct=$(sacct -n -P -X -u "$USER" -S "$since" -s CD,TO -o State,Elapsed,TotalCPU,AllocCPUS)
+  acct=$(sacct -n -P -X -u "$USER" -S "$since" -o State,Elapsed,TotalCPU,AllocCPUS)
 fi
+echo "$acct" | awk -F'|' 'NF {split($1, w, " "); c[w[1]]++} END {for (st in c) printf "%6d %s\n", c[st], st}' | sort -rn
 rows=$(echo "$acct" | awk -F'|' '
   function secs(t,   d, p, n, s) {
     d = 0
@@ -127,8 +128,6 @@ rows=$(echo "$acct" | awk -F'|' '
     s = (n == 3) ? p[1] * 3600 + p[2] * 60 + p[3] : p[1] * 60 + p[2]
     return d * 86400 + s
   }
-  $1 == "COMPLETED" && secs($2) > 0 { printf "C %.3f %d\n", secs($3) / (secs($2) * $4), secs($2) }
-  $1 == "TIMEOUT" { print "T" }')
-echo "completed: $(echo "$rows" | grep -c '^C')   timed out: $(echo "$rows" | grep -c '^T')"
-echo "median CPU efficiency of completed (TotalCPU / Elapsed / CPUs): $(echo "$rows" | awk '$1 == "C" {print $2}' | median)"
-echo "median elapsed seconds of completed: $(echo "$rows" | awk '$1 == "C" {print $3}' | median)"
+  $1 == "COMPLETED" && secs($2) > 0 { printf "%.3f %d\n", secs($3) / (secs($2) * $4), secs($2) }')
+echo "completed tasks: median CPU efficiency (TotalCPU / Elapsed / CPUs): $(echo "$rows" | awk 'NF {print $1}' | median)"
+echo "completed tasks: median elapsed seconds: $(echo "$rows" | awk 'NF {print $2}' | median)"
