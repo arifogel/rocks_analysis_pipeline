@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14]
+        os: [ubuntu-24.04, macos-26]
         compilation_mode: [fastbuild]
         include:
           # dbg (CLion's debug mode) and opt (production) exercise build-mode-specific
