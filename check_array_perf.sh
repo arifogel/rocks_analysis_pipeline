@@ -137,7 +137,10 @@ secs=$(echo "$acct" | awk -F'|' '
     return d * 86400 + s
   }
   $1 == "COMPLETED" { printf "%d\n", secs($2) }' | sort -n)
-echo "$secs" | awk 'NF {a[++n] = $1; sum += $1} END {
+echo "$secs" | awk 'NF {a[++n] = $1; sum += $1}
+  function tm(q,   k, i, t) { k = int(n * q); if (k < 1) k = 1; for (i = 1; i <= k; i++) t += a[i]; return t / k / 60 }
+  END {
   if (!n) { print "no completed tasks"; exit }
   printf "completed tasks (n=%d), elapsed: mean %.1f min  median %.1f  p10 %.1f  p90 %.1f  min %.1f  max %.1f\n", n, sum / n / 60,
-    a[int((n + 1) / 2)] / 60, a[int(n * 0.1) + 1] / 60, a[int(n * 0.9) + 1] / 60, a[1] / 60, a[n] / 60 }'
+    a[int((n + 1) / 2)] / 60, a[int(n * 0.1) + 1] / 60, a[int(n * 0.9) + 1] / 60, a[1] / 60, a[n] / 60
+  printf "trimmed means (mean of the fastest q of tasks): tm99 %.1f min  tm90 %.1f min\n", tm(0.99), tm(0.9) }'
