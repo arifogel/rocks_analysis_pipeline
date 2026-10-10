@@ -3,6 +3,7 @@
 #
 # Usage: check_array_perf.sh [-w SECONDS] [-s SINCE] [JOBID...]
 #   -w  sampling window per node (default 10)
+#   -n  max nodes to ssh to, chosen at random; 0 means all (default 3)
 #   -s  sacct start time for finished tasks (default now-1days)
 #   JOBID  array job ids to look at (default: every job you are running)
 #
@@ -18,10 +19,12 @@ set -uo pipefail
 USER=${USER:-$(id -un)}
 
 window=10
+max_nodes=3
 since="now-1days"
-while getopts "w:s:" opt; do
+while getopts "w:n:s:" opt; do
   case $opt in
     w) window=$OPTARG ;;
+    n) max_nodes=$OPTARG ;;
     s) since=$OPTARG ;;
     *) exit 2 ;;
   esac
@@ -73,8 +76,12 @@ else
   jobs=$(squeue -u "$USER" -t R -h -o "%A %N")
 fi
 nodes=$(echo "$jobs" | awk 'NF {print $2}' | sort -u)
+total_nodes=$(echo "$nodes" | grep -c .)
+if [ "$max_nodes" -gt 0 ] && [ "$total_nodes" -gt "$max_nodes" ]; then
+  nodes=$(echo "$nodes" | sort -R | head -n "$max_nodes")
+fi
 
-echo "== Running processes (window ${window}s) =="
+echo "== Running processes (window ${window}s, $(echo "$nodes" | grep -c .) of $total_nodes nodes) =="
 if [ -z "$nodes" ]; then
   echo "no running jobs"
 else
