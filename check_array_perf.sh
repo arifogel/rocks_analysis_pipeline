@@ -31,9 +31,9 @@ while getopts "w:n:s:" opt; do
 done
 shift $((OPTIND - 1))
 
-# Runs on a compute node. Prints: JOB PID STATE CPU% FDS_BEFORE FDS_AFTER MB_PER_MIN CMD WCHAN
+# Runs on a compute node. Prints: JOB PID STATE CPU% FDS_BEFORE FDS_AFTER MB_PER_MIN CMD WCHAN THREADS AGE_MIN
 probe() {
-  local w=$1 tick pid fd t rest n bytes sz comm wchan
+  local w=$1 tick pid fd t rest n bytes sz comm wchan thr start el up
   tick=$(getconf CLK_TCK)
   snap() {
     for p in /proc/[0-9]*; do
@@ -53,7 +53,11 @@ probe() {
       rest=$(sed 's/^.*) //' "$p/stat" 2>/dev/null) || continue
       comm=$(tr ' ' _ <"$p/comm" 2>/dev/null)
       wchan=$(cat "$p/wchan" 2>/dev/null)
-      echo "$pid $rest $n $bytes ${comm:-?} ${wchan:-0}" | awk '{print $1, $2, $13 + $14, $(NF-3), $(NF-2), $(NF-1), $NF}'
+      thr=$(cat "$p"/task/*/stat 2>/dev/null | sed 's/^.*) //' | cut -c1 | sort | uniq -c | awk '{printf "%s%s", $2, $1}')
+      start=$(echo "$rest" | awk '{print $20}')
+      up=$(cut -d' ' -f1 /proc/uptime)
+      el=$(awk -v u="$up" -v s="$start" -v t="$tick" 'BEGIN {printf "%d", (u - s / t) / 60}')
+      echo "$pid $rest $n $bytes ${comm:-?} ${wchan:-0} ${thr:-?} $el" | awk '{print $1, $2, $13 + $14, $(NF-5), $(NF-4), $(NF-3), $(NF-2), $(NF-1), $NF}'
     done
   }
   snap >/tmp/.perf0.$$
@@ -65,7 +69,7 @@ probe() {
       cmd = "grep -o \"job_[0-9]*\" /proc/" $1 "/cgroup 2>/dev/null | head -1 | cut -d_ -f2"
       job = ""; cmd | getline job; close(cmd)
       if (job == "") job = "-"
-      printf "%s %s %s %.0f %d %d %.1f %s %s\n", job, $1, $2, ($3 - t0[$1]) / tick / w * 100, n0[$1], $4, ($5 - b0[$1]) / 1048576 / w * 60, $6, $7
+      printf "%s %s %s %.0f %d %d %.1f %s %s %s %s\n", job, $1, $2, ($3 - t0[$1]) / tick / w * 100, n0[$1], $4, ($5 - b0[$1]) / 1048576 / w * 60, $6, $7, $8, $9
     }' /tmp/.perf0.$$ /tmp/.perf1.$$
   rm -f /tmp/.perf0.$$ /tmp/.perf1.$$
 }
@@ -93,7 +97,7 @@ else
   done
   wait
   {
-    echo "NODE JOB PID STATE CPU% FDS_BEFORE FDS_AFTER MB/min CMD WCHAN VERDICT"
+    echo "NODE JOB PID STATE CPU% FDS_BEFORE FDS_AFTER MB/min CMD WCHAN THREADS AGE_MIN VERDICT"
     for node in $nodes; do
       if [ -s "$tmp/$node.err" ]; then echo "$node ERROR $(head -1 "$tmp/$node.err")"; fi
       echo "$node has $(echo "$jobs" | awk -v n="$node" '$2 == n' | wc -l) running jobs, $(wc -l <"$tmp/$node") with .spec/.speck files open" >&2
