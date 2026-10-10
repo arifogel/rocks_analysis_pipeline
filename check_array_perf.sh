@@ -9,7 +9,7 @@
 #
 # Part 1 ssh's to each node running your jobs and samples every process of yours
 # that holds a .spec/.speck file open. Healthy: CPU% high, the same output files
-# held open for the whole window (FDS equal), MB/s steady. Unhealthy: state D, CPU%
+# held open for the whole window (FDS equal), MB/min steady. Unhealthy: state D, CPU%
 # low, FDS changing, which means the file is being reopened.
 # A running job missing from the table either is not in a specsims/Katydid step or
 # reopens its files between samples.
@@ -31,7 +31,7 @@ while getopts "w:n:s:" opt; do
 done
 shift $((OPTIND - 1))
 
-# Runs on a compute node. Prints: JOB PID STATE CPU% FDS_BEFORE FDS_AFTER MB_PER_S
+# Runs on a compute node. Prints: JOB PID STATE CPU% FDS_BEFORE FDS_AFTER MB_PER_MIN
 probe() {
   local w=$1 tick pid fd t rest n bytes sz
   tick=$(getconf CLK_TCK)
@@ -63,7 +63,7 @@ probe() {
       cmd = "grep -o \"job_[0-9]*\" /proc/" $1 "/cgroup 2>/dev/null | head -1 | cut -d_ -f2"
       job = ""; cmd | getline job; close(cmd)
       if (job == "") job = "-"
-      printf "%s %s %s %.0f %d %d %.1f\n", job, $1, $2, ($3 - t0[$1]) / tick / w * 100, n0[$1], $4, ($5 - b0[$1]) / 1048576 / w
+      printf "%s %s %s %.0f %d %d %.1f\n", job, $1, $2, ($3 - t0[$1]) / tick / w * 100, n0[$1], $4, ($5 - b0[$1]) / 1048576 / w * 60
     }' /tmp/.perf0.$$ /tmp/.perf1.$$
   rm -f /tmp/.perf0.$$ /tmp/.perf1.$$
 }
@@ -91,7 +91,7 @@ else
   done
   wait
   {
-    echo "NODE JOB PID STATE CPU% FDS_BEFORE FDS_AFTER MB/s VERDICT"
+    echo "NODE JOB PID STATE CPU% FDS_BEFORE FDS_AFTER MB/min VERDICT"
     for node in $nodes; do
       if [ -s "$tmp/$node.err" ]; then echo "$node ERROR $(head -1 "$tmp/$node.err")"; fi
       echo "$node has $(echo "$jobs" | awk -v n="$node" '$2 == n' | wc -l) running jobs, $(wc -l <"$tmp/$node") with .spec/.speck files open" >&2
