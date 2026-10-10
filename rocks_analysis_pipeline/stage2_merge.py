@@ -17,8 +17,11 @@ slew_times is not archived here: identical across every task of a run (same
 DAQ config, same simulated acquisition timing), and not consumed
 downstream.
 
-Strict: if any task directory is missing any of bands/dmtracks/events/points
-.pb.zst, run_stage2_merge raises before writing anything.
+Strict: if any task directory is missing a requested type's .pb.zst,
+run_stage2_merge raises before writing anything.
+
+run_stage2_merge archives all four types by default, or only the types it
+is given, so each type can run as its own job.
 
 Each of the four archives is a checkpointed step in runs_dir/run_name/
 (.checkpoint-merge-<type>, with -<job id start>-<job id end> appended for a
@@ -33,6 +36,7 @@ on disk.
 
 import logging
 import tarfile
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -44,6 +48,7 @@ from rocks_analysis_pipeline.stage1_steps import (
     EVENTS_PROTO_FILENAME,
     POINTS_PROTO_FILENAME,
 )
+from rocks_analysis_pipeline.stage2_types import ARCHIVE_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -63,15 +68,13 @@ class ChunkScope:
     num_fields: int
 
 
-# (name, stage-1 filename) for each archived type. name keys the type's
-# checkpoint and output filename.
-_ARCHIVES = (
-    ("bands", BANDS_PROTO_FILENAME),
-    ("dmtracks", DMTRACKS_PROTO_FILENAME),
-    ("events", EVENTS_PROTO_FILENAME),
-    ("points", POINTS_PROTO_FILENAME),
-)
-_ARCHIVED_FILENAMES = tuple(filename for _, filename in _ARCHIVES)
+# Stage-1 filename for each archived type.
+_FILENAME_BY_TYPE = {
+    "bands": BANDS_PROTO_FILENAME,
+    "dmtracks": DMTRACKS_PROTO_FILENAME,
+    "events": EVENTS_PROTO_FILENAME,
+    "points": POINTS_PROTO_FILENAME,
+}
 
 
 def _archive_filename(name: str, chunk: ChunkScope | None) -> str:
@@ -120,13 +123,13 @@ def find_task_dirs(*, runs_dir: Path, run_name: str, chunk: ChunkScope | None = 
     ]
 
 
-def check_all_files_present(task_dirs: list[Path]) -> None:
-    """Raises if any task directory is missing any of bands/dmtracks/
-    events/points .pb.zst. Called once, upfront, before any archiving starts.
+def check_all_files_present(task_dirs: list[Path], filenames: Sequence[str]) -> None:
+    """Raises if any task directory is missing any of filenames. Called
+    once, upfront, before any archiving starts.
     """
     missing: dict[Path, list[str]] = {}
     for d in task_dirs:
-        missing_here = [filename for filename in _ARCHIVED_FILENAMES if not (d / filename).is_file()]
+        missing_here = [filename for filename in filenames if not (d / filename).is_file()]
         if missing_here:
             missing[d] = missing_here
     if missing:
@@ -151,27 +154,32 @@ def _write_tar(*, run_dir: Path, task_dirs: list[Path], filename: str, path: Pat
                 tar.addfile(member, f)
 
 
-def run_stage2_merge(*, runs_dir: Path, run_name: str, chunk: ChunkScope | None = None) -> None:
-    """The actual stage-2 step: archives bands/dmtracks/events/points into
-    runs_dir/run_name/<type>.tar, sibling to that run's subrun_*/
-    directories. With chunk given, archives only that chunk's task
-    directories into <type>_<job id start>-<job id end>.tar.
+def run_stage2_merge(
+    *, runs_dir: Path, run_name: str, chunk: ChunkScope | None = None, types: Sequence[str] = ARCHIVE_TYPES
+) -> None:
+    """The actual stage-2 step: archives each of types (every type in
+    ARCHIVE_TYPES by default) into runs_dir/run_name/<type>.tar, sibling to
+    that run's subrun_*/ directories. With chunk given, archives only that
+    chunk's task directories into <type>_<job id start>-<job id end>.tar.
 
     Each type is a checkpointed step in runs_dir/run_name/, so a rerun
-    skips the types already archived. Raises if any task directory is
-    missing any of the four expected files.
+    skips the types already archived. Raises if types names an unknown
+    type, or if any task directory is missing a requested type's file.
     """
+    unknown = sorted(set(types) - set(ARCHIVE_TYPES))
+    if unknown:
+        raise ValueError(f"unknown type(s) {unknown}; expected a subset of {list(ARCHIVE_TYPES)}")
     run_dir = runs_dir / run_name
-    steps = [(_step_name(name, chunk), name, filename) for name, filename in _ARCHIVES]
+    steps = [(_step_name(name, chunk), name, _FILENAME_BY_TYPE[name]) for name in ARCHIVE_TYPES if name in types]
     if all(is_checkpointed(run_dir, step) for step, _, _ in steps):
-        logger.info("stage2 merge: every output already archived under %s", run_dir)
+        logger.info("stage2 merge: every requested output already archived under %s", run_dir)
         return
 
     task_dirs = find_task_dirs(runs_dir=runs_dir, run_name=run_name, chunk=chunk)
     if not task_dirs:
         raise RuntimeError(f"No stage-1 task directories found under {run_dir}/subrun_*/field_*")
     logger.info("stage2 merge: found %d task dir(s) under %s", len(task_dirs), run_dir)
-    check_all_files_present(task_dirs)
+    check_all_files_present(task_dirs, [filename for _, _, filename in steps])
 
     for step, name, filename in steps:
 

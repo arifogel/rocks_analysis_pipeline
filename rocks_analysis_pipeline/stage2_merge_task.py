@@ -20,6 +20,7 @@ from pathlib import Path
 
 from rocks_analysis_pipeline.logging_setup import init_logging
 from rocks_analysis_pipeline.stage2_merge import ChunkScope, run_stage2_merge
+from rocks_analysis_pipeline.stage2_types import ARCHIVE_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,14 @@ def parse_args() -> argparse.Namespace:
 
     arg("--runs-dir", type=str, required=True, help="base runs directory")
     arg("--run-name", type=str, required=True, help="run name")
+    arg(
+        "--type",
+        dest="types",
+        action="append",
+        choices=ARCHIVE_TYPES,
+        default=None,
+        help="Output type to archive; repeatable. Default: every type.",
+    )
 
     arg(
         "--chunk-job-id-start",
@@ -84,7 +93,9 @@ def main() -> None:
         if args.chunk_job_id_start is not None
         else None
     )
-    run_stage2_merge(runs_dir=Path(args.runs_dir), run_name=args.run_name, chunk=chunk)
+    run_stage2_merge(
+        runs_dir=Path(args.runs_dir), run_name=args.run_name, chunk=chunk, types=args.types or ARCHIVE_TYPES
+    )
 
 
 if __name__ == "__main__":
