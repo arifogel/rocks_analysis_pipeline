@@ -21,7 +21,7 @@ bazel_dep(name = "protobuf", version = "36.2")
 bazel_dep(name = "he6-cres-spec-sims", version = "0.2.0")
 git_override(
     module_name = "he6-cres-spec-sims",
-    commit = "fa717f166b210d5111071616ed031907e8f39301",  # main, as of 2026-09-22: "lockfile-sync.yaml: add **/*.bzl trigger (#7)"
+    commit = "855351e427fe5ce7c4d31524cca43eb39876c6b3",
     remote = "https://github.com/arifogel/he6-cres-spec-sims.git",
 )
 
