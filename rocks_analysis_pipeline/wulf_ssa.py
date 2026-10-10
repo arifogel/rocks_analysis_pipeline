@@ -106,6 +106,13 @@ def parse_args() -> argparse.Namespace:
         help="sbatch --mem (GB) for each simulation+analysis task. Peak RSS of one task is about 0.4 GB.",
     )
     arg(
+        "--task-scratch-dir",
+        type=str,
+        default="/tmp",
+        help="node-local directory where each simulation+analysis task works. Only the task's "
+        "final output is copied to --runs-dir. An empty string works directly in --runs-dir.",
+    )
+    arg(
         "--max-concurrent",
         type=int,
         default=0,
@@ -245,6 +252,9 @@ def build_map_command(
         parts.append(shlex.quote(f"--noise-id={args.noise_id}"))
     else:
         parts += ["--noise-paths", shlex.quote(args.noise_paths[0]), shlex.quote(args.noise_paths[1])]
+
+    if args.task_scratch_dir:
+        parts.append(shlex.quote(f"--scratch-dir={args.task_scratch_dir}"))
 
     if args.use_ghcss:
         parts.append("--use-ghcss")
