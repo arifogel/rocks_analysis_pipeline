@@ -103,9 +103,6 @@ jobs:
           # One disk cache per compilation mode; the repository cache is shared.
           disk-cache: ${{ matrix.compilation_mode }}
 
-      - name: Expunge Bazel state
-        run: bazel clean --expunge
-
       - name: Verify MODULE.bazel.lock is up to date and build everything
         run: bazel build -c ${{ matrix.compilation_mode }} --@pypi//venv=dev //...
 
@@ -179,9 +176,6 @@ jobs:
           repository-cache: true
           disk-cache: true
           cache-version: almalinux9
-
-      - name: Expunge Bazel state
-        run: bazel clean --expunge
 
       - name: Verify MODULE.bazel.lock is up to date and build everything
         run: bazel build --@pypi//venv=dev //...
