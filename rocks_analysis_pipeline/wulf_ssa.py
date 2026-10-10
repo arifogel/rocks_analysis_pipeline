@@ -15,8 +15,8 @@ Input: a run name, a base specsims yaml/json config, a katydid config,
 and a noise reference (--noise-id or --noise-paths) -- see --help for the
 full set.
 
-Output: four files per chunk under runs_dir/run_name/ -- bands_<a>-<b>.pb.zst,
-dmtracks_<a>-<b>.pb.zst, events_<a>-<b>.pb.zst, points_<a>-<b>.pb.zst, <a>-<b>
+Output: four files per chunk under runs_dir/run_name/ -- bands_<a>-<b>.tar,
+dmtracks_<a>-<b>.tar, events_<a>-<b>.tar, points_<a>-<b>.tar, <a>-<b>
 that chunk's inclusive job id range.
 
 Side effects: one map sbatch invocation per chunk, each immediately followed by that

@@ -228,11 +228,6 @@ py_library(
     deps = [
         ":checkpoints_lib",
         ":stage1_steps_lib",
-        "//rocks_analysis_pipeline/api/v1:band_py_pb2",
-        "//rocks_analysis_pipeline/api/v1:dmtrack_py_pb2",
-        "//rocks_analysis_pipeline/api/v1:event_py_pb2",
-        "//rocks_analysis_pipeline/api/v1:point_py_pb2",
-        "//rocks_analysis_pipeline/api/v1:v1_init_lib",
     ],
 )
 

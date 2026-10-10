@@ -1,46 +1,41 @@
-"""Stage 2: merges stage-1 task output into per-run BandLists/DMTrackLists/
-EventLists/PointLists files -- runs_dir/run_name/{bands,dmtracks,events,
-points}.pb.zst, sibling to that run's subrun_*/ directories.
+"""Stage 2: archives stage-1 task output into per-run tar files --
+runs_dir/run_name/{bands,dmtracks,events,points}.tar, sibling to that run's
+subrun_*/ directories.
 
-run_stage2_merge's chunk=None default merges every task directory the run
+Each tar holds one stage-1 file per task, byte for byte, as
+subrun_<id>/field_<index>/<filename>. Every member keeps the TaskIdentity
+inside its own BandList/DMTrackList/EventList/PointList, so no per-task
+identity is lost. A reader streams the tar one member at a time.
+
+run_stage2_merge's chunk=None default archives every task directory the run
 has into one unsuffixed set of those four files. Passing a ChunkScope
-instead merges only that chunk's task directories, into the same four
-filenames with -<chunk index> inserted before their extensions. Chunking
-bounds a reduce job's output and memory footprint to one map array's worth
-of tasks.
+instead archives only that chunk's task directories, into filenames with
+_<job id start>-<job id end> inserted before the extension. Memory use is
+one copy buffer, whatever the chunk size.
 
-Deliberately a merge, not a flatten: each task's BandList/DMTrackList/
-EventList/PointList already carries its own TaskIdentity, and is gathered
-as-is into the wrapping BandLists/DMTrackLists/EventLists/PointLists, not
-exploded into one flat list of rows. No per-row identity is lost, and no
-schema change to Band/DMTrack/Event/Point themselves was needed for this.
-
-slew_times is not merged here: identical across every task of a run (same
+slew_times is not archived here: identical across every task of a run (same
 DAQ config, same simulated acquisition timing), and not consumed
 downstream.
 
 Strict: if any task directory is missing any of bands/dmtracks/events/points
 .pb.zst, run_stage2_merge raises before writing anything.
 
-Each of the four merges is a checkpointed step in runs_dir/run_name/
+Each of the four archives is a checkpointed step in runs_dir/run_name/
 (.checkpoint-merge-<type>, with -<job id start>-<job id end> appended for a
 chunk). Rerunning skips the steps already done and returns at once when all
 four are.
 
-Runs in-process, not as a subprocess, since a pure read-and-merge step
-needs no crash isolation. Also has a thin CLI driver (stage2_merge_task.py)
-for running stage 2 as a separate step against whatever stage-1 output
-already exists on disk.
+Runs in-process, not as a subprocess, since a pure copy step needs no crash
+isolation. Also has a thin CLI driver (stage2_merge_task.py) for running
+stage 2 as a separate step against whatever stage-1 output already exists
+on disk.
 """
 
 import logging
+import tarfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, TypeVar
 
-import compression.zstd as zstd
-
-from rocks_analysis_pipeline.api.v1 import band_pb2, dmtrack_pb2, event_pb2, point_pb2
 from rocks_analysis_pipeline.checkpoints import is_checkpointed, run_checkpointed
 from rocks_analysis_pipeline.stage1_state import task_dir
 from rocks_analysis_pipeline.stage1_steps import (
@@ -51,8 +46,6 @@ from rocks_analysis_pipeline.stage1_steps import (
 )
 
 logger = logging.getLogger(__name__)
-
-ListMessage = TypeVar("ListMessage")
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -70,14 +63,30 @@ class ChunkScope:
     num_fields: int
 
 
-def _chunked_filename(filename: str, chunk: ChunkScope) -> str:
-    """filename with _<job id start>-<job id end> inserted before every
-    extension (bands.pb.zst -> bands_0-999.pb.zst): both numbers are job
-    ids actually in this chunk, since job_id_start and job_id_end are both
-    inclusive.
+# (name, stage-1 filename) for each archived type. name keys the type's
+# checkpoint and output filename.
+_ARCHIVES = (
+    ("bands", BANDS_PROTO_FILENAME),
+    ("dmtracks", DMTRACKS_PROTO_FILENAME),
+    ("events", EVENTS_PROTO_FILENAME),
+    ("points", POINTS_PROTO_FILENAME),
+)
+_ARCHIVED_FILENAMES = tuple(filename for _, filename in _ARCHIVES)
+
+
+def _archive_filename(name: str, chunk: ChunkScope | None) -> str:
+    """The output filename for type name: <name>.tar, or
+    <name>_<job id start>-<job id end>.tar for a chunk.
     """
-    stem, _, ext = filename.partition(".")
-    return f"{stem}_{chunk.job_id_start}-{chunk.job_id_end}.{ext}"
+    if chunk is None:
+        return f"{name}.tar"
+    return f"{name}_{chunk.job_id_start}-{chunk.job_id_end}.tar"
+
+
+def _step_name(name: str, chunk: ChunkScope | None) -> str:
+    if chunk is None:
+        return f"merge-{name}"
+    return f"merge-{name}-{chunk.job_id_start}-{chunk.job_id_end}"
 
 
 def find_task_dirs(*, runs_dir: Path, run_name: str, chunk: ChunkScope | None = None) -> list[Path]:
@@ -86,7 +95,7 @@ def find_task_dirs(*, runs_dir: Path, run_name: str, chunk: ChunkScope | None = 
 
     chunk=None matches task_dir's path convention
     (runs_dir/run_name/subrun_<id>/field_<index>), discovered by globbing
-    rather than computed from an expected count, so this merges whatever
+    rather than computed from an expected count, so this archives whatever
     stage 1 actually produced and runs standalone against partial or
     already-cleaned-up runs.
 
@@ -94,9 +103,9 @@ def find_task_dirs(*, runs_dir: Path, run_name: str, chunk: ChunkScope | None = 
     from its job id range (subrun_id, field_index = divmod(job_id,
     num_fields)): the expected set is already known exactly, so no glob is
     needed. A task dir that doesn't exist on disk is still returned:
-    check_all_files_present and _merge_one_type already treat every one of
-    its (necessarily absent) files as missing, the same as a directory
-    that exists but is incomplete.
+    check_all_files_present treats every one of its (necessarily absent)
+    files as missing, the same as a directory that exists but is
+    incomplete.
     """
     if chunk is None:
         return sorted((runs_dir / run_name).glob("subrun_*/field_*"))
@@ -111,35 +120,13 @@ def find_task_dirs(*, runs_dir: Path, run_name: str, chunk: ChunkScope | None = 
     ]
 
 
-def _read_proto_zst(message_cls: Callable[[], ListMessage], path: Path) -> ListMessage:
-    with zstd.open(path, "rb") as f:
-        message = message_cls()
-        message.ParseFromString(f.read())
-    return message
-
-
-def _write_proto_zst(message, path: Path) -> None:
-    """Serializes message and writes it, zstd-compressed, to path. Small
-    and self-contained enough not to share across a module boundary it
-    wasn't designed for."""
-    with zstd.open(path, "wb") as f:
-        f.write(message.SerializeToString())
-
-
-# Every proto type stage 2 merges -- the single source of truth for both
-# check_all_files_present's strict-mode validation and run_stage2_merge's
-# per-type merge calls, so the two can never drift out of sync with each
-# other.
-_MERGED_FILENAMES = (BANDS_PROTO_FILENAME, DMTRACKS_PROTO_FILENAME, EVENTS_PROTO_FILENAME, POINTS_PROTO_FILENAME)
-
-
 def check_all_files_present(task_dirs: list[Path]) -> None:
     """Raises if any task directory is missing any of bands/dmtracks/
-    events/points .pb.zst. Called once, upfront, before any merging starts.
+    events/points .pb.zst. Called once, upfront, before any archiving starts.
     """
     missing: dict[Path, list[str]] = {}
     for d in task_dirs:
-        missing_here = [filename for filename in _MERGED_FILENAMES if not (d / filename).is_file()]
+        missing_here = [filename for filename in _ARCHIVED_FILENAMES if not (d / filename).is_file()]
         if missing_here:
             missing[d] = missing_here
     if missing:
@@ -150,96 +137,34 @@ def check_all_files_present(task_dirs: list[Path]) -> None:
         )
 
 
-def _merge_one_type(
-    *,
-    task_dirs: list[Path],
-    filename: str,
-    list_message_cls: Callable[[], ListMessage],
-    lists_message_cls: Callable[[], object],
-    lists_field_name: str,
-) -> object:
-    """Generic merge for one proto type: reads filename out of every task
-    directory and gathers each one, as-is, into lists_message_cls's repeated
-    lists_field_name.
+def _write_tar(*, run_dir: Path, task_dirs: list[Path], filename: str, path: Path) -> None:
+    """Writes path as a tar of filename from every task directory, in the
+    order given, each member named by its path relative to run_dir.
     """
-    merged = lists_message_cls()
-    field = getattr(merged, lists_field_name)
-    for d in task_dirs:
-        field.append(_read_proto_zst(list_message_cls, d / filename))
-    return merged
-
-
-def merge_bands(task_dirs: list[Path]) -> band_pb2.BandLists:
-    return _merge_one_type(
-        task_dirs=task_dirs,
-        filename=BANDS_PROTO_FILENAME,
-        list_message_cls=band_pb2.BandList,
-        lists_message_cls=band_pb2.BandLists,
-        lists_field_name="band_lists",
-    )
-
-
-def merge_dmtracks(task_dirs: list[Path]) -> dmtrack_pb2.DMTrackLists:
-    return _merge_one_type(
-        task_dirs=task_dirs,
-        filename=DMTRACKS_PROTO_FILENAME,
-        list_message_cls=dmtrack_pb2.DMTrackList,
-        lists_message_cls=dmtrack_pb2.DMTrackLists,
-        lists_field_name="dmtrack_lists",
-    )
-
-
-def merge_events(task_dirs: list[Path]) -> event_pb2.EventLists:
-    return _merge_one_type(
-        task_dirs=task_dirs,
-        filename=EVENTS_PROTO_FILENAME,
-        list_message_cls=event_pb2.EventList,
-        lists_message_cls=event_pb2.EventLists,
-        lists_field_name="event_lists",
-    )
-
-
-def merge_points(task_dirs: list[Path]) -> point_pb2.PointLists:
-    return _merge_one_type(
-        task_dirs=task_dirs,
-        filename=POINTS_PROTO_FILENAME,
-        list_message_cls=point_pb2.PointList,
-        lists_message_cls=point_pb2.PointLists,
-        lists_field_name="point_lists",
-    )
-
-
-# (name, filename, merge function) for each merged proto type. name keys the
-# type's checkpoint.
-_MERGES = (
-    ("bands", BANDS_PROTO_FILENAME, merge_bands),
-    ("dmtracks", DMTRACKS_PROTO_FILENAME, merge_dmtracks),
-    ("events", EVENTS_PROTO_FILENAME, merge_events),
-    ("points", POINTS_PROTO_FILENAME, merge_points),
-)
-
-
-def _step_name(name: str, chunk: ChunkScope | None) -> str:
-    if chunk is None:
-        return f"merge-{name}"
-    return f"merge-{name}-{chunk.job_id_start}-{chunk.job_id_end}"
+    with tarfile.open(path, "w") as tar:
+        for d in task_dirs:
+            src = d / filename
+            member = tarfile.TarInfo(name=src.relative_to(run_dir).as_posix())
+            member.size = src.stat().st_size
+            member.mode = 0o644
+            with src.open("rb") as f:
+                tar.addfile(member, f)
 
 
 def run_stage2_merge(*, runs_dir: Path, run_name: str, chunk: ChunkScope | None = None) -> None:
-    """The actual stage-2 step: merges bands/dmtracks/events/points and
-    writes each to runs_dir/run_name/<same filename as the per-task one>,
-    sibling to that run's subrun_*/ directories. With chunk given, merges
-    only that chunk's task directories into the same four filenames, each
-    with _<job id start>-<job id end> inserted before its extension.
+    """The actual stage-2 step: archives bands/dmtracks/events/points into
+    runs_dir/run_name/<type>.tar, sibling to that run's subrun_*/
+    directories. With chunk given, archives only that chunk's task
+    directories into <type>_<job id start>-<job id end>.tar.
 
     Each type is a checkpointed step in runs_dir/run_name/, so a rerun
-    skips the types already merged. Raises if any task directory is
+    skips the types already archived. Raises if any task directory is
     missing any of the four expected files.
     """
     run_dir = runs_dir / run_name
-    steps = [(_step_name(name, chunk), filename, merge) for name, filename, merge in _MERGES]
+    steps = [(_step_name(name, chunk), name, filename) for name, filename in _ARCHIVES]
     if all(is_checkpointed(run_dir, step) for step, _, _ in steps):
-        logger.info("stage2 merge: every output already merged under %s", run_dir)
+        logger.info("stage2 merge: every output already archived under %s", run_dir)
         return
 
     task_dirs = find_task_dirs(runs_dir=runs_dir, run_name=run_name, chunk=chunk)
@@ -248,11 +173,11 @@ def run_stage2_merge(*, runs_dir: Path, run_name: str, chunk: ChunkScope | None 
     logger.info("stage2 merge: found %d task dir(s) under %s", len(task_dirs), run_dir)
     check_all_files_present(task_dirs)
 
-    for step, filename, merge in steps:
+    for step, name, filename in steps:
 
-        def merge_and_write(filename=filename, merge=merge) -> None:
-            path = run_dir / (filename if chunk is None else _chunked_filename(filename, chunk))
-            _write_proto_zst(merge(task_dirs), path)
-            logger.info("wrote %s: %d task(s) merged", path, len(task_dirs))
+        def archive(name=name, filename=filename) -> None:
+            path = run_dir / _archive_filename(name, chunk)
+            _write_tar(run_dir=run_dir, task_dirs=task_dirs, filename=filename, path=path)
+            logger.info("wrote %s: %d task(s) archived", path, len(task_dirs))
 
-        run_checkpointed(task_dir=run_dir, step_name=step, fn=merge_and_write)
+        run_checkpointed(task_dir=run_dir, step_name=step, fn=archive)
