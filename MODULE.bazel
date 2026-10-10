@@ -28,7 +28,7 @@ git_override(
 bazel_dep(name = "katydid", version = "0.1.0")
 git_override(
     module_name = "katydid",
-    commit = "f402778be1237790ae22c7364734da7d1695be7b",
+    commit = "ac1fe708c728138fe452c0e11b15644c683bd88f",
     remote = "https://github.com/arifogel/katydid.git",
 )
 
