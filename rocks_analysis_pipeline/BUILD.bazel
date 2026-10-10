@@ -170,7 +170,7 @@ py_library(
     ],
 )
 
-# Its entire job is asserting the specsims binary resolves via runfiles, no use while ghcss is
+# Only job: asserting the specsims binary resolves via runfiles -- no use while ghcss is
 # commented out repo-wide (see MODULE.bazel).
 # py_test(
 #     name = "stage1_steps_specsims_resolution_test",

@@ -4,16 +4,15 @@ Local, parallel driver for spec-sims subruns.
 
 For each subrun, generates all of its per-field configs via
 RunSpecSimsGhcss.run(generate_configs_only=True) -- config generation only,
-no he6_cres_spec_sims import at all (see run_spec_sims_ghcss.py's own module
-docstring for why that's a separate file rather than an edit to
-run_spec_sims.py) -- so config generation and discovery for a subrun always
-happen as a single, uninterrupted unit, with correct sequential field
-indices. Only *after* a subrun's configs are generated does the driver fan
-the resulting per-field config paths out across a flat process pool, each
-invoking ghcss's specsims binary (built from github.com/arifogel/ghcss,
-cmd/specsims) as a subprocess with --config <config_path> -- the Go port of
-the same Simulation(config_path).run_full() call Experiment.run_sims()'s own
-per-field loop used to make -- entirely within one `bazel run` invocation.
+no he6_cres_spec_sims import at all -- so config generation and discovery
+for a subrun always happen as a single, uninterrupted unit, with correct
+sequential field indices. Only *after* a subrun's configs are generated
+does the driver fan the resulting per-field config paths out across a flat
+process pool, each invoking ghcss's specsims binary (built from
+github.com/arifogel/ghcss, cmd/specsims) as a subprocess with --config
+<config_path> -- the Go port of the same Simulation(config_path).run_full()
+call Experiment.run_sims()'s per-field loop makes -- entirely within one
+`bazel run` invocation.
 
 Each job's full log is written into the same directory RunSpecSims/DAQ
 already create for that (subrun, field) today:
@@ -37,14 +36,14 @@ even though the rest of this project currently targets a newer version.
 import os
 
 # This must run before numpy is imported anywhere in this process (below,
-# and transitively via run_spec_sims_ghcss's own light numpy usage for field
+# and transitively via run_spec_sims_ghcss's light numpy usage for field
 # rounding) -- otherwise the underlying BLAS/OpenMP library has already
 # latched onto its default thread count. This matters far less than it used
 # to now that each worker process's actual simulation work happens in a
 # separate ghcss (Go) subprocess rather than in-process via
 # he6_cres_spec_sims/scipy, but it's a harmless, still-technically-correct
-# precaution against the same oversubscription this process's own numpy
-# import could in principle cause, so it's kept rather than removed. Using
+# precaution against the same oversubscription this process's numpy import
+# could in principle cause, so it's kept rather than removed. Using
 # setdefault() rather than a plain assignment so an explicit value the user
 # has already set in their environment is left alone.
 for _thread_env_var in (
@@ -75,8 +74,8 @@ logger = logging.getLogger(__name__)
 # Canonical bzlmod repo name for the ghcss module (see MODULE.bazel's
 # bazel_dep(name = "ghcss", ...)) plus the path to the specsims go_binary
 # within it. If the canonical repo name or build layout for that target
-# changes, update this to match -- resolve_specsims_path()'s own error
-# message points back here.
+# changes, update this to match -- resolve_specsims_path()'s error message
+# points back here.
 SPECSIMS_RLOCATION = "ghcss+/cmd/specsims/specsims_/specsims"
 
 # Must match exitCodeProfilingStopped in ghcss's cmd/specsims/main.go exactly.
@@ -95,7 +94,7 @@ def resolve_specsims_path() -> str:
             f"Could not resolve the ghcss specsims binary via runfiles at "
             f"'{SPECSIMS_RLOCATION}' (got: {specsims_path}). If the "
             f"canonical repo name for the ghcss module, or the go_binary's "
-            f"own runfile path, has changed, update SPECSIMS_RLOCATION at "
+            f"runfile path, has changed, update SPECSIMS_RLOCATION at "
             f"the top of this file."
         )
     return specsims_path
@@ -206,9 +205,9 @@ def build_jobs(args: argparse.Namespace) -> list[dict[str, Any]]:
         ).run(generate_configs_only=True)
 
         for field_index, config_path in enumerate(config_paths):
-            # Matches Results.get_path_name()'s own computation exactly,
-            # since config_path is a real path RunSpecSimsGhcss just
-            # generated (not a predicted/guessed one).
+            # Matches Results.get_path_name()'s computation exactly, since
+            # config_path is a real path RunSpecSimsGhcss just generated
+            # (not a predicted/guessed one).
             output_dir: Path = config_path.parent / config_path.stem
             log_path: Path = output_dir / "local_spec_sims.log"
 
@@ -230,7 +229,7 @@ def _run_one_job(params: dict[str, Any]) -> None:
     This is a top-level function (not a closure) so it can be pickled and
     sent to a spawned worker process. Invokes ghcss's specsims binary as a
     subprocess with --config <config_path> -- the Go port of the same
-    Simulation(config_path).run_full() call Experiment.run_sims()'s own
+    Simulation(config_path).run_full() call Experiment.run_sims()'s
     per-field loop used to make -- with its stdout/stderr redirected into
     the job's natural output directory so parallel jobs don't interleave in
     the terminal.
@@ -263,11 +262,10 @@ def _run_one_job(params: dict[str, Any]) -> None:
             command: list[str] = [specsims_path, "--config", str(config_path)]
             # Opt-in debugging hook, off by default: SPECSIMS_PROFILE_DURATION
             # (e.g. "30s") makes *every* job in this run capture a profile
-            # into its own output_dir and self-terminate after that
-            # duration, instead of running to completion. A run started this
-            # way will not produce valid, complete spec/speck output (every
-            # job stops partway through on purpose) -- it's for profiling
-            # only.
+            # into its output_dir and self-terminate after that duration,
+            # instead of running to completion. A run started this way will
+            # not produce valid, complete spec/speck output (every job stops
+            # partway through on purpose) -- it's for profiling only.
             #
             # SPECSIMS_PROFILE_MODE picks which kind, and must be set
             # together with SPECSIMS_PROFILE_DURATION (silently ignored
@@ -277,10 +275,9 @@ def _run_one_job(params: dict[str, Any]) -> None:
             # `go tool trace -pprof=...` then `go tool pprof -top`) captures
             # scheduling latency and off-CPU blocked time -- the right tool
             # for contention between concurrently running processes, but its
-            # own instrumentation overhead changes the very thing being
-            # measured, and comparing a --trace-instrumented run against an
-            # uninstrumented baseline produced a real, wrong conclusion once
-            # already in this project's own profiling history. --cpuprofile
+            # instrumentation overhead changes the very thing being
+            # measured, so comparing a --trace-instrumented run against an
+            # uninstrumented baseline risks a wrong conclusion. --cpuprofile
             # (runtime/pprof, analyzed directly with `go tool pprof -top` --
             # no trace-extraction step needed, since it's already pprof
             # format) samples actual on-CPU execution time instead, a more
@@ -288,8 +285,8 @@ def _run_one_job(params: dict[str, Any]) -> None:
             # when the question is "which function is actually expensive"
             # rather than "are processes contending with each other." Kept
             # as separate, mutually exclusive modes (never both flags on the
-            # same command) specifically so this hook can't be used to
-            # repeat that same mistake.
+            # same command), so instrumentation overhead from one mode
+            # never contaminates a measurement meant to use the other.
             profile_duration = os.environ.get("SPECSIMS_PROFILE_DURATION")
             profile_mode = os.environ.get("SPECSIMS_PROFILE_MODE")
             if profile_duration and profile_mode == "trace":
@@ -313,8 +310,8 @@ def _run_one_job(params: dict[str, Any]) -> None:
                 )
 
             # check=True: a nonzero exit raises CalledProcessError, caught
-            # below. The subprocess's own stdout/stderr (redirected here,
-            # not captured/buffered by Python) already went straight into
+            # below. The subprocess's stdout/stderr (redirected here, not
+            # captured/buffered by Python) already went straight into
             # log_file, so there's nothing further to print from a
             # successful or failed run beyond the exception itself.
             try:
@@ -328,9 +325,9 @@ def _run_one_job(params: dict[str, Any]) -> None:
                 if e.returncode == SPECSIMS_EXIT_CODE_PROFILING_STOPPED:
                     # Deliberate (--profile-duration or a signal cut this
                     # job short on purpose), not a failure -- see
-                    # SPECSIMS_EXIT_CODE_PROFILING_STOPPED's own comment.
+                    # SPECSIMS_EXIT_CODE_PROFILING_STOPPED's comment.
                     # Returns normally rather than re-raising so this
-                    # doesn't get counted as a failed job by main()'s own
+                    # doesn't get counted as a failed job by main()'s
                     # summary below.
                     print(
                         f"\nsubrun {params['subrun_id']} field {params['field_index']} "

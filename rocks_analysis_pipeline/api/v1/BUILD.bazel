@@ -6,9 +6,9 @@ load("//tools:deps.bzl", "cdeps")
 
 package(default_visibility = ["//visibility:public"])
 
-# Explicit __init__.py for this package - see //rocks_analysis_pipeline:package_init_lib for the
-# same reasoning; //rocks_analysis_pipeline:package_init_lib itself covers the parent api/
-# package's __init__.py.
+# Explicit __init__.py for this package: rules_python's implicit creation is deprecated and
+# disabled repo-wide (rules_python_config.explicit_init_py in MODULE.bazel).
+# //rocks_analysis_pipeline:package_init_lib covers the parent api/ package's __init__.py.
 py_library(
     name = "v1_init_lib",
     srcs = ["__init__.py"],
@@ -80,22 +80,21 @@ py_proto_library(
     deps = [":point_proto"],
 )
 
-# Wraps every proto type's own py_proto_library output with an explicit
-# sys.path entry for this repo's own root (two levels up from
+# Wraps every proto type's py_proto_library output with an explicit
+# sys.path entry for this repo's root (two levels up from
 # rocks_analysis_pipeline/api/v1/, where this package lives) -- needed
-# for cross-module consumers like cresproc (an entirely different bazel
-# module, depending on this one via bazel_dep), which otherwise get
+# for cross-module consumers like cresproc (a separate Bazel module,
+# depending on this one via bazel_dep), which otherwise get
 # "ModuleNotFoundError: No module named 'rocks_analysis_pipeline'":
-# confirmed directly, not assumed, that py_proto_library's own generated
-# target doesn't propagate a usable imports/sys.path entry the way a
-# plain py_library does (a real .pth file from a real cresproc build had
-# no entry for this module's own runfiles at all, while protobuf's own
-# python runtime -- which does set this up correctly -- was present).
-# Matches he6-cres-spec-sims's own py_library, which needs the identical
-# fix for the identical reason (also consumed cross-module, by this
-# project itself) -- see that project's own src/he6_cres_spec_sims/
-# BUILD.bazel: imports = [".."], one level up from where that package
-# lives, same idea.
+# py_proto_library's generated target doesn't propagate a usable
+# imports/sys.path entry the way a plain py_library does. A real .pth
+# file from a real cresproc build had no entry for this module's
+# runfiles, while protobuf's python runtime (which does set this up
+# correctly) was present. Matches he6-cres-spec-sims's py_library, which
+# needs the identical fix for the identical reason (also consumed
+# cross-module, by this project) -- see src/he6_cres_spec_sims/BUILD.bazel
+# there: imports = [".."], one level up from where that package lives,
+# same idea.
 py_library(
     name = "api_v1_py",
     imports = ["../.."],

@@ -21,14 +21,14 @@ bazel_dep(name = "protobuf", version = "36.2")
 bazel_dep(name = "he6-cres-spec-sims", version = "0.2.0")
 git_override(
     module_name = "he6-cres-spec-sims",
-    commit = "fa717f166b210d5111071616ed031907e8f39301",  # main, as of 2026-09-22: "lockfile-sync.yaml: add **/*.bzl trigger (#7)"
+    commit = "dd7f264a631a327234cf200574fb1e593d8ecdcb",
     remote = "https://github.com/arifogel/he6-cres-spec-sims.git",
 )
 
 bazel_dep(name = "katydid", version = "0.1.0")
 git_override(
     module_name = "katydid",
-    commit = "80b5a8dc47198972b74676924f4fd62d808b3513",
+    commit = "9cfc9f5eb8f0206486879fce9cfd5ab219846b97",
     remote = "https://github.com/arifogel/katydid.git",
 )
 

@@ -13,11 +13,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14]
+        os: [ubuntu-24.04, macos-26]
         compilation_mode: [fastbuild]
         include:
-          # dbg and opt get special-cased handling in the Bazel build (see .bazelrc's
-          # STANDARD define and KTLogger's own NDEBUG/STANDARD-gated verbosity floor) that
+          # dbg and opt get special-cased handling in the Bazel build (see katydid's
+          # tools/katydid_cc.bzl's STANDARD define and KTLogger's own NDEBUG/STANDARD-gated
+          # verbosity floor) that
           # fastbuild alone never exercises - dbg is also specifically the mode CLion's
           # Bazel plugin uses when debugging, and opt is what actual production runs use.
           # One OS is enough to catch a regression in either; this logic is not
@@ -38,7 +39,18 @@ jobs:
       # compiler already searches by default, so no further configuration is needed - see
       # katydid's tools/ubuntu_libs.bzl), needed to build @katydid as a Bazel dependency.
       #
-      # see github.com/arifogel/katydid/tree/main/.github/workflows/ci.yaml for more information
+      # Caches just the downloaded .deb files, keyed directly on a hash of this file, rather
+      # than a third-party action (e.g. awalsh128/cache-apt-pkgs-action) that computes its own
+      # cache key internally from the package list: such an action's own key computation is
+      # opaque and can go stale silently -- GitHub Actions' own cache fallback mechanism ("the
+      # default branch cache is available to other branches") can then serve an outdated cache
+      # across branches with no error, a documented, repeatedly-reported problem for that
+      # specific action (e.g. awalsh128/cache-apt-pkgs-action#138, #56). This key is correct by
+      # construction instead, since it changes if and only if this file - which is the only
+      # place the package list lives - changes. `apt-get install` itself is fast and safe to
+      # run unconditionally even on a cache hit, since apt already skips re-downloading
+      # packages it finds in its local archive cache and skips reinstalling packages already
+      # at the requested version.
       - name: Cache downloaded .deb files (Linux)
         if: runner.os == 'Linux'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
@@ -67,9 +79,9 @@ jobs:
           sudo rm -f /var/cache/apt/archives/lock
           sudo rm -rf /var/cache/apt/archives/partial
 
-      # --- macOS: Homebrew is preinstalled on GitHub's runners, but Boost, FFTW, and MatIO are
-      # not, and are large enough downloads to be worth caching across CI runs even though each
-      # run starts from a fresh virtual machine.
+      # --- macOS: Homebrew is preinstalled on GitHub's runners, but Boost, FFTW, and MatIO
+      # are not, and are large enough downloads to be worth caching across CI runs even
+      # though each run starts from a fresh virtual machine.
       - name: Cache Homebrew downloads (macOS)
         if: runner.os == 'macOS'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
@@ -102,10 +114,8 @@ jobs:
 
       - name: Test everything
         run: bazel test -c ${{ matrix.compilation_mode }} //...
-  # rather than as a third value in the matrix above: GitHub Actions has a known issue
-  # (https://github.com/actions/runner/issues/265) where using an empty `container:` value to
-  # mean "run natively, no container" for some matrix combinations can fail workflow validation
-  # outright. A fully separate job avoids that risk entirely.
+
+  # Container-based jobs:
   build-and-test-almalinux:
     name: Bazel Build (almalinux-9)
     runs-on: ubuntu-latest
@@ -119,7 +129,8 @@ jobs:
       # keepcache=True below is needed for this cache to actually help: dnf deletes downloaded
       # packages after a successful install by default. Keyed on a hash of this file (which is
       # the only place the package list lives), matching "Cache downloaded .deb files (Linux)"
-      # above: a static key would never refresh if the package list itself changed.
+      # in the Ubuntu job above: a static key would never refresh if the package list itself
+      # changed.
       - name: Cache dnf packages
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
@@ -127,12 +138,12 @@ jobs:
           key: dnf-cache-almalinux9-${{ hashFiles('.github/workflows/ci.yaml') }}
 
       # AlmaLinux is a RHEL-family Linux distribution, using dnf rather than apt. gcc-c++ (a C++
-      # compiler) and git (which Bazel uses to fetch this repo's bundled dependencies) are
-      # Bazel's requirements, missing from this minimal container image by default. cpio
-      # unpacks the .rpm packages katydid's tools/almalinux_libs.bzl fetches; rpm2cpio ships with
-      # the base image as part of the `rpm` package. Bazel fetches Boost/FFTW/MatIO/TBB/xxhash/
-      # FreeType/GSL hermetically from AlmaLinux's and EPEL's pinned package archives (see
-      # katydid's tools/almalinux_libs.bzl).
+      # compiler) and git (which Bazel uses to fetch this repo's dependencies) are Bazel's
+      # own requirements, missing from this minimal container image by default. cpio unpacks the
+      # .rpm packages katydid's tools/almalinux_libs.bzl fetches; rpm2cpio ships with the base image as
+      # part of the `rpm` package. Bazel fetches Boost/FFTW/MatIO/TBB/xxhash/FreeType/GSL
+      # hermetically from AlmaLinux's and EPEL's pinned package archives
+      # (katydid's tools/almalinux_libs.bzl).
       - name: Install build tools (dnf)
         run: |
           dnf install -y --setopt=keepcache=True \
@@ -170,22 +181,6 @@ jobs:
           bazelisk-cache: true
           repository-cache: true
           disk-cache: true
-          # Without this, this job shares a cache namespace with the ubuntu-24.04 matrix
-          # jobs above: setup-bazel's own disk-cache key is scoped by the *runner's* platform/
-          # arch, not by anything specific to this job -- and since this job is runs-on:
-          # ubuntu-latest with container: almalinux:9 (the container changes what actually
-          # executes, not what the runner itself reports), setup-bazel sees the identical
-          # "linux-x64" identity the native Ubuntu jobs do. GitHub Actions cache keys are
-          # immutable once written (a save to an existing key is silently skipped, never
-          # overwritten) -- so a save under a shared, colliding key, from any job, at any
-          # point, permanently locks that slot's content in for every future run under that
-          # same key, regardless of which job's own build actually produced it. Confirmed
-          # directly, not assumed: a real run showed this job restoring a "successful" cache
-          # hit that was only ~5 MB (disk) / ~0 MB (repository) -- far too small to be a real
-          # Katydid build's own disk cache, and Bazel recompiling everything from scratch
-          # despite the "successful" restore. cache-version below gives this job its own,
-          # unshared slot, the same mechanism (and the same reasoning) as the Ubuntu matrix
-          # job's own cache-version above.
           cache-version: almalinux9
 
       - name: Verify MODULE.bazel.lock is up to date and build everything
