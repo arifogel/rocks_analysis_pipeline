@@ -5,10 +5,9 @@ submits Slurm jobs instead of running local subprocesses.
 
 Map: every (subrun, field) simulation+analysis task for a run, run in
 parallel on wulf's compute nodes, chunked into one or more Slurm job
-arrays (see --chunk-size). Reduce: one job per chunk, each dependent only
-on that chunk's map tasks finishing (not necessarily succeeding -- see
---allow-missing), merging that chunk's outputs into one of this run's
-per-chunk results -- never more than one chunk's worth of tasks in memory
+arrays (see --chunk-size). Reduce: one job per chunk, each starting only
+after every task of that chunk's map array has succeeded, merging that
+chunk's outputs into one of this run's per-chunk results -- never more than one chunk's worth of tasks in memory
 at once, bounding a reduce job's memory footprint regardless of how
 large the run is.
 
@@ -27,12 +26,12 @@ array, since a single array job can only hold as many tasks as the cluster's Max
 allows (see --chunk-size's help for how to find that limit). Each task writes a log
 under runs_dir/run_name/subrun_*/field_*/, matching where a locally-run task would.
 Reduce: one single, non-array job per chunk, submitted with
---dependency=afterany:<that chunk's map array id> -- Slurm starts it once every task
-in that chunk has finished, whether or not each one succeeded (afterok would instead
-block this job forever the moment any single array task fails, defeating
-stage2_merge_task's --allow-missing). Every job's sbatch stdout/stderr capture (a
-fallback for whatever each doesn't already log itself, e.g. a crash before
-logging starts) goes under runs_dir/run_name/slurm_logs/.
+--dependency=afterok:<that chunk's map array id> -- Slurm starts it once every task
+in that chunk has succeeded, and leaves it pending if any task fails. Resubmitting a
+run is idempotent: map tasks resume from their checkpoints, and reduce jobs skip the
+outputs already merged. Every job's sbatch stdout/stderr capture (a fallback for
+whatever each doesn't already log itself, e.g. a crash before logging starts) goes
+under runs_dir/run_name/slurm_logs/.
 
 Execution environment: run this script on cenpa-wulf's head node; it does
 no simulation, analysis, or merge work itself, only submits jobs that do.
@@ -128,7 +127,6 @@ def parse_args() -> argparse.Namespace:
         "worth of tasks at a time (see this module's doc comment)",
     )
 
-    arg("--allow-missing", action="store_true", help="pass --allow-missing through to the merge job")
 
     arg("--dry-run", action="store_true", help="print the map/reduce commands that would be submitted, without calling sbatch")
 
@@ -293,8 +291,6 @@ def build_reduce_command(
         shlex.quote(f"--chunk-job-id-end={offset + chunk_size - 1}"),
         shlex.quote(f"--chunk-num-fields={num_fields}"),
     ]
-    if args.allow_missing:
-        parts.append("--allow-missing")
     parts.append(shlex.quote(f"--log-level={args.log_level}"))
     if args.log_override:
         parts.append(shlex.quote(f"--log-override={args.log_override}"))
@@ -350,7 +346,7 @@ def submit_reduce_chunk(
     chunk_size: int,
     map_job_id: str,
 ) -> str:
-    """Submits one chunk's reduce job, with --dependency=afterany:<that chunk's map job id>."""
+    """Submits one chunk's reduce job, with --dependency=afterok:<that chunk's map job id>."""
     slurm_log_dir = Path(args.runs_dir) / args.run_name / "slurm_logs"
     slurm_log_dir.mkdir(parents=True, exist_ok=True)
     log_path = slurm_log_dir / f"reduce_chunk{chunk_index}_%j.log"
@@ -369,7 +365,7 @@ def submit_reduce_chunk(
         tlim=args.merge_tlim,
         log_path=log_path,
         mem=args.merge_mem_gb,
-        dependency=f"afterany:{map_job_id}",
+        dependency=f"afterok:{map_job_id}",
     )
     return proc.stdout.strip()
 

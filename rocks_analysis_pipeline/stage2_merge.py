@@ -19,11 +19,13 @@ slew_times is not merged here: identical across every task of a run (same
 DAQ config, same simulated acquisition timing), and not consumed
 downstream.
 
-Strict by default: if any task directory is missing any of bands/dmtracks/
-events/points .pb.zst, run_stage2_merge refuses to write anything at all --
-not just for the affected type, the whole merge doesn't start.
-allow_missing opts into the alternative: skip whatever's missing (per
-type, with a warning), merging whatever is actually there.
+Strict: if any task directory is missing any of bands/dmtracks/events/points
+.pb.zst, run_stage2_merge raises before writing anything.
+
+Each of the four merges is a checkpointed step in runs_dir/run_name/
+(.checkpoint-merge-<type>, with -<job id start>-<job id end> appended for a
+chunk). Rerunning skips the steps already done and returns at once when all
+four are.
 
 Runs in-process, not as a subprocess, since a pure read-and-merge step
 needs no crash isolation. Also has a thin CLI driver (stage2_merge_task.py)
@@ -39,6 +41,7 @@ from typing import Callable, TypeVar
 import compression.zstd as zstd
 
 from rocks_analysis_pipeline.api.v1 import band_pb2, dmtrack_pb2, event_pb2, point_pb2
+from rocks_analysis_pipeline.checkpoints import is_checkpointed, run_checkpointed
 from rocks_analysis_pipeline.stage1_state import task_dir
 from rocks_analysis_pipeline.stage1_steps import (
     BANDS_PROTO_FILENAME,
@@ -132,10 +135,7 @@ _MERGED_FILENAMES = (BANDS_PROTO_FILENAME, DMTRACKS_PROTO_FILENAME, EVENTS_PROTO
 
 def check_all_files_present(task_dirs: list[Path]) -> None:
     """Raises if any task directory is missing any of bands/dmtracks/
-    events/points .pb.zst. Called once, upfront, before any merging starts
-    (not per-type, mid-merge) -- so with allow_missing=False (the
-    default), a missing file is caught before any output is written at
-    all, not just for the affected type.
+    events/points .pb.zst. Called once, upfront, before any merging starts.
     """
     missing: dict[Path, list[str]] = {}
     for d in task_dirs:
@@ -146,8 +146,7 @@ def check_all_files_present(task_dirs: list[Path]) -> None:
         details = "; ".join(f"{d}: missing {', '.join(files)}" for d, files in missing.items())
         raise RuntimeError(
             f"{len(missing)} of {len(task_dirs)} task dir(s) are missing expected stage-1 output -- "
-            f"refusing to merge (pass allow_missing=True / --allow-missing to merge anyway, skipping "
-            f"whatever's missing): {details}"
+            f"refusing to merge: {details}"
         )
 
 
@@ -160,22 +159,13 @@ def _merge_one_type(
     lists_field_name: str,
 ) -> object:
     """Generic merge for one proto type: reads filename out of every task
-    directory that has it. Missing files -- a task that hasn't reached
-    this step yet, or was run with --keep-<x> pointed elsewhere -- are
-    skipped, not an error. Gathers each one, as-is, into
-    lists_message_cls's repeated lists_field_name.
+    directory and gathers each one, as-is, into lists_message_cls's repeated
+    lists_field_name.
     """
     merged = lists_message_cls()
     field = getattr(merged, lists_field_name)
-    n_missing = 0
     for d in task_dirs:
-        p = d / filename
-        if not p.is_file():
-            n_missing += 1
-            continue
-        field.append(_read_proto_zst(list_message_cls, p))
-    if n_missing:
-        logger.warning("%d of %d task dir(s) missing %s; skipped", n_missing, len(task_dirs), filename)
+        field.append(_read_proto_zst(list_message_cls, d / filename))
     return merged
 
 
@@ -219,51 +209,50 @@ def merge_points(task_dirs: list[Path]) -> point_pb2.PointLists:
     )
 
 
-def run_stage2_merge(
-    *, runs_dir: Path, run_name: str, allow_missing: bool = False, chunk: ChunkScope | None = None
-) -> None:
+# (name, filename, merge function) for each merged proto type. name keys the
+# type's checkpoint.
+_MERGES = (
+    ("bands", BANDS_PROTO_FILENAME, merge_bands),
+    ("dmtracks", DMTRACKS_PROTO_FILENAME, merge_dmtracks),
+    ("events", EVENTS_PROTO_FILENAME, merge_events),
+    ("points", POINTS_PROTO_FILENAME, merge_points),
+)
+
+
+def _step_name(name: str, chunk: ChunkScope | None) -> str:
+    if chunk is None:
+        return f"merge-{name}"
+    return f"merge-{name}-{chunk.job_id_start}-{chunk.job_id_end}"
+
+
+def run_stage2_merge(*, runs_dir: Path, run_name: str, chunk: ChunkScope | None = None) -> None:
     """The actual stage-2 step: merges bands/dmtracks/events/points and
     writes each to runs_dir/run_name/<same filename as the per-task one>,
     sibling to that run's subrun_*/ directories. With chunk given, merges
     only that chunk's task directories into the same four filenames, each
-    with -<chunk index> inserted before its extension.
+    with _<job id start>-<job id end> inserted before its extension.
 
-    allow_missing=False (the default) refuses to write anything at all if
-    any task directory is missing any of the four expected files.
-    allow_missing=True skips whatever's missing per type instead (with a
-    warning), merging whatever is actually there; the only thing
-    allow_missing changes is whether check_all_files_present runs first
-    to rule it out entirely.
+    Each type is a checkpointed step in runs_dir/run_name/, so a rerun
+    skips the types already merged. Raises if any task directory is
+    missing any of the four expected files.
     """
+    run_dir = runs_dir / run_name
+    steps = [(_step_name(name, chunk), filename, merge) for name, filename, merge in _MERGES]
+    if all(is_checkpointed(run_dir, step) for step, _, _ in steps):
+        logger.info("stage2 merge: every output already merged under %s", run_dir)
+        return
+
     task_dirs = find_task_dirs(runs_dir=runs_dir, run_name=run_name, chunk=chunk)
     if not task_dirs:
-        raise RuntimeError(f"No stage-1 task directories found under {runs_dir / run_name}/subrun_*/field_*")
-    logger.info("stage2 merge: found %d task dir(s) under %s", len(task_dirs), runs_dir / run_name)
+        raise RuntimeError(f"No stage-1 task directories found under {run_dir}/subrun_*/field_*")
+    logger.info("stage2 merge: found %d task dir(s) under %s", len(task_dirs), run_dir)
+    check_all_files_present(task_dirs)
 
-    if not allow_missing:
-        check_all_files_present(task_dirs)
+    for step, filename, merge in steps:
 
-    run_dir = runs_dir / run_name
+        def merge_and_write(filename=filename, merge=merge) -> None:
+            path = run_dir / (filename if chunk is None else _chunked_filename(filename, chunk))
+            _write_proto_zst(merge(task_dirs), path)
+            logger.info("wrote %s: %d task(s) merged", path, len(task_dirs))
 
-    def out_path(filename: str) -> Path:
-        return run_dir / (filename if chunk is None else _chunked_filename(filename, chunk))
-
-    merged_bands = merge_bands(task_dirs)
-    bands_path = out_path(BANDS_PROTO_FILENAME)
-    _write_proto_zst(merged_bands, bands_path)
-    logger.info("wrote %s: %d task(s) merged", bands_path, len(merged_bands.band_lists))
-
-    merged_dmtracks = merge_dmtracks(task_dirs)
-    dmtracks_path = out_path(DMTRACKS_PROTO_FILENAME)
-    _write_proto_zst(merged_dmtracks, dmtracks_path)
-    logger.info("wrote %s: %d task(s) merged", dmtracks_path, len(merged_dmtracks.dmtrack_lists))
-
-    merged_events = merge_events(task_dirs)
-    events_path = out_path(EVENTS_PROTO_FILENAME)
-    _write_proto_zst(merged_events, events_path)
-    logger.info("wrote %s: %d task(s) merged", events_path, len(merged_events.event_lists))
-
-    merged_points = merge_points(task_dirs)
-    points_path = out_path(POINTS_PROTO_FILENAME)
-    _write_proto_zst(merged_points, points_path)
-    logger.info("wrote %s: %d task(s) merged", points_path, len(merged_points.point_lists))
+        run_checkpointed(task_dir=run_dir, step_name=step, fn=merge_and_write)

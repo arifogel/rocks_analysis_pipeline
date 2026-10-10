@@ -32,12 +32,6 @@ def parse_args() -> argparse.Namespace:
 
     arg("--runs-dir", type=str, required=True, help="base runs directory")
     arg("--run-name", type=str, required=True, help="run name")
-    arg(
-        "--allow-missing",
-        action="store_true",
-        help="merge whatever's actually there, skipping (with a warning) any task dir missing bands/dmtracks/"
-        "events/points .pb.zst -- default: refuse to write anything at all if anything is missing",
-    )
 
     arg(
         "--chunk-job-id-start",
@@ -90,9 +84,7 @@ def main() -> None:
         if args.chunk_job_id_start is not None
         else None
     )
-    run_stage2_merge(
-        runs_dir=Path(args.runs_dir), run_name=args.run_name, allow_missing=args.allow_missing, chunk=chunk
-    )
+    run_stage2_merge(runs_dir=Path(args.runs_dir), run_name=args.run_name, chunk=chunk)
 
 
 if __name__ == "__main__":

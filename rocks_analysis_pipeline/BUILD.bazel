@@ -226,6 +226,7 @@ py_library(
     name = "stage2_merge_lib",
     srcs = ["stage2_merge.py"],
     deps = [
+        ":checkpoints_lib",
         ":stage1_steps_lib",
         "//rocks_analysis_pipeline/api/v1:band_py_pb2",
         "//rocks_analysis_pipeline/api/v1:dmtrack_py_pb2",
