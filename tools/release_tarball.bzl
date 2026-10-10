@@ -67,9 +67,11 @@ rm -rf "$STAGE"
 release_tarball = rule(
     implementation = _release_tarball_impl,
     attrs = {
+        # Target configuration: the runfiles ship in the tarball, so they build like any other
+        # target and follow -c.
         "binary": attr.label(
             executable = True,
-            cfg = "exec",
+            cfg = "target",
             mandatory = True,
             doc = "The umbrella py_binary whose venv this warms and whose runfiles this tars.",
         ),

@@ -100,14 +100,8 @@ jobs:
         with:
           bazelisk-cache: true
           repository-cache: true
-          disk-cache: true
-          # Without this, all three ubuntu-24.04 variants (fastbuild/dbg/opt) compute an
-          # identical disk-cache key (setup-bazel's own cache key is scoped by platform/arch,
-          # not by anything specific to this workflow's matrix), and race to save to the same
-          # slot - not a correctness risk, since Bazel's disk cache is content-addressed
-          # internally, but only one of the three would actually persist between CI runs,
-          # non-deterministically. This gives each compilation mode its own cache namespace.
-          cache-version: ${{ matrix.compilation_mode }}
+          # One disk cache per compilation mode; the repository cache is shared.
+          disk-cache: ${{ matrix.compilation_mode }}
 
       - name: Verify MODULE.bazel.lock is up to date and build everything
         run: bazel build -c ${{ matrix.compilation_mode }} --@pypi//venv=dev //...
