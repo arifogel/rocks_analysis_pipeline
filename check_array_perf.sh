@@ -31,9 +31,9 @@ while getopts "w:n:s:" opt; do
 done
 shift $((OPTIND - 1))
 
-# Runs on a compute node. Prints: JOB PID STATE CPU% FDS_BEFORE FDS_AFTER MB_PER_MIN
+# Runs on a compute node. Prints: JOB PID STATE CPU% FDS_BEFORE FDS_AFTER MB_PER_MIN CMD WCHAN
 probe() {
-  local w=$1 tick pid fd t rest n bytes sz
+  local w=$1 tick pid fd t rest n bytes sz comm wchan
   tick=$(getconf CLK_TCK)
   snap() {
     for p in /proc/[0-9]*; do
@@ -51,7 +51,9 @@ probe() {
       done
       [ "$n" -gt 0 ] || continue
       rest=$(sed 's/^.*) //' "$p/stat" 2>/dev/null) || continue
-      echo "$pid $rest $n $bytes" | awk '{print $1, $2, $13 + $14, $(NF-1), $NF}'
+      comm=$(tr ' ' _ <"$p/comm" 2>/dev/null)
+      wchan=$(cat "$p/wchan" 2>/dev/null)
+      echo "$pid $rest $n $bytes ${comm:-?} ${wchan:-0}" | awk '{print $1, $2, $13 + $14, $(NF-3), $(NF-2), $(NF-1), $NF}'
     done
   }
   snap >/tmp/.perf0.$$
@@ -63,7 +65,7 @@ probe() {
       cmd = "grep -o \"job_[0-9]*\" /proc/" $1 "/cgroup 2>/dev/null | head -1 | cut -d_ -f2"
       job = ""; cmd | getline job; close(cmd)
       if (job == "") job = "-"
-      printf "%s %s %s %.0f %d %d %.1f\n", job, $1, $2, ($3 - t0[$1]) / tick / w * 100, n0[$1], $4, ($5 - b0[$1]) / 1048576 / w * 60
+      printf "%s %s %s %.0f %d %d %.1f %s %s\n", job, $1, $2, ($3 - t0[$1]) / tick / w * 100, n0[$1], $4, ($5 - b0[$1]) / 1048576 / w * 60, $6, $7
     }' /tmp/.perf0.$$ /tmp/.perf1.$$
   rm -f /tmp/.perf0.$$ /tmp/.perf1.$$
 }
@@ -91,13 +93,13 @@ else
   done
   wait
   {
-    echo "NODE JOB PID STATE CPU% FDS_BEFORE FDS_AFTER MB/min VERDICT"
+    echo "NODE JOB PID STATE CPU% FDS_BEFORE FDS_AFTER MB/min CMD WCHAN VERDICT"
     for node in $nodes; do
       if [ -s "$tmp/$node.err" ]; then echo "$node ERROR $(head -1 "$tmp/$node.err")"; fi
       echo "$node has $(echo "$jobs" | awk -v n="$node" '$2 == n' | wc -l) running jobs, $(wc -l <"$tmp/$node") with .spec/.speck files open" >&2
       awk -v node="$node" '{v = ($3 != "D" && $4 >= 70 && $5 == $6) ? "OK" : "SLOW"; print node, $0, v}' "$tmp/$node"
     done
-  } | awk '{for (i = 1; i <= NF; i++) printf "%-*s", (i == NF ? 0 : 11), $i; print ""}'
+  } | awk '{for (i = 1; i <= NF; i++) printf "%-*s ", (i == NF ? 0 : 11), $i; print ""}'
   rm -rf "$tmp"
 fi
 
