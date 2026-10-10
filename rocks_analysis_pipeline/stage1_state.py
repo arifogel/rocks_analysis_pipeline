@@ -38,17 +38,10 @@ step's output deleted out from under it, with no record that this was
 expected, is not.
 """
 
-import logging
-import shutil
-import tempfile
 from pathlib import Path
 from typing import Callable
 
-from rocks_analysis_pipeline.checkpoints import is_checkpointed, mark_checkpoint, run_checkpointed
-
-logger = logging.getLogger(__name__)
-
-_CHECKPOINT_PREFIX = ".checkpoint-"
+from rocks_analysis_pipeline.checkpoints import is_checkpointed, run_checkpointed
 
 # The one flat, ordered sequence of steps for a stage-1 task. Order here is
 # the order they run in; there is no other structure.
@@ -190,72 +183,3 @@ def run_stage1_task(
         if step in skip_steps:
             continue
         run_checkpointed(task_dir=d, step_name=step, fn=lambda step=step: step_fns[step](d))
-
-
-def _sync_dir(src: Path, dst: Path) -> None:
-    """Makes dst's files match src's. Checkpoint markers are written after
-    every other file, so a marker never precedes the output it vouches for.
-    """
-    dst.mkdir(parents=True, exist_ok=True)
-    src_files = {p.relative_to(src) for p in src.rglob("*") if p.is_file()}
-    markers = {r for r in src_files if len(r.parts) == 1 and r.name.startswith(_CHECKPOINT_PREFIX)}
-    for rel in sorted(src_files - markers):
-        (dst / rel).parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src / rel, dst / rel)
-    for rel in sorted(markers):
-        mark_checkpoint(dst, rel.name.removeprefix(_CHECKPOINT_PREFIX))
-    for p in dst.rglob("*"):
-        if p.is_file() and p.relative_to(dst) not in src_files:
-            p.unlink()
-
-
-def run_stage1_task_in_scratch(
-    *,
-    runs_dir: Path,
-    scratch_dir: Path,
-    run_name: str,
-    subrun_id: int,
-    field_index: int,
-    step_fns: dict[str, Callable[[Path], None]],
-    skip_steps: frozenset[str] = frozenset(),
-) -> None:
-    """Runs run_stage1_task against a copy of the task directory under scratch_dir.
-
-    On success the task directory under runs_dir is updated to match the copy.
-    On failure only *.log files are copied back. Resumes from any state
-    already in runs_dir.
-
-    Args:
-        runs_dir: base runs directory holding the task's persistent output.
-        scratch_dir: directory on fast storage, typically node-local, that hosts the working copy.
-        run_name: run name.
-        subrun_id: subrun ID.
-        field_index: field index.
-        step_fns: maps each entry in STEPS to its implementation.
-        skip_steps: steps to skip, as in run_stage1_task.
-    """
-    final_dir = task_dir(runs_dir=runs_dir, run_name=run_name, subrun_id=subrun_id, field_index=field_index)
-    scratch_dir.mkdir(parents=True, exist_ok=True)
-    scratch_root = Path(tempfile.mkdtemp(prefix=f"stage1-{run_name}-", dir=scratch_dir))
-    work_dir = task_dir(runs_dir=scratch_root, run_name=run_name, subrun_id=subrun_id, field_index=field_index)
-    try:
-        if final_dir.is_dir():
-            _sync_dir(final_dir, work_dir)
-        try:
-            run_stage1_task(
-                runs_dir=scratch_root,
-                run_name=run_name,
-                subrun_id=subrun_id,
-                field_index=field_index,
-                step_fns=step_fns,
-                skip_steps=skip_steps,
-            )
-        except BaseException:
-            for log in work_dir.rglob("*.log"):
-                dest = final_dir / log.relative_to(work_dir)
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(log, dest)
-            raise
-        _sync_dir(work_dir, final_dir)
-    finally:
-        shutil.rmtree(scratch_root, ignore_errors=True)

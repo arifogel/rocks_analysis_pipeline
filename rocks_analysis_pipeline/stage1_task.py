@@ -36,7 +36,6 @@ from rocks_analysis_pipeline.stage1_state import (
     STEP_UNCOMPRESSED_KATYDID_LOG_DELETED,
     STEP_UNCOMPRESSED_SPECSIMS_LOG_DELETED,
     run_stage1_task,
-    run_stage1_task_in_scratch,
 )
 
 logger = logging.getLogger(__name__)
@@ -88,14 +87,6 @@ def parse_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
         default=None,
         help="number of field_index values per subrun, required alongside --job-id to derive "
         "subrun_id/field_index -- mutually exclusive with --subrun-id/--field-index",
-    )
-
-    arg(
-        "--scratch-dir",
-        type=str,
-        default=None,
-        help="directory on fast storage, typically node-local, where the task works. Only its "
-        "final output is copied to --runs-dir. Default: work directly in --runs-dir",
     )
 
     arg("--yaml-config", type=str, required=True, help="base specsims yaml config")
@@ -280,7 +271,7 @@ def main() -> None:
     if skip_steps:
         logger.info("skipping (--keep-*) steps: %s", sorted(skip_steps))
 
-    task_kwargs = dict(
+    run_stage1_task(
         runs_dir=Path(args.runs_dir),
         run_name=args.run_name,
         subrun_id=subrun_id,
@@ -288,10 +279,6 @@ def main() -> None:
         step_fns=build_step_fns(args, noise_paths),
         skip_steps=skip_steps,
     )
-    if args.scratch_dir:
-        run_stage1_task_in_scratch(scratch_dir=Path(args.scratch_dir), **task_kwargs)
-    else:
-        run_stage1_task(**task_kwargs)
     logger.info("stage1_task complete: run_name=%s subrun_id=%s field_index=%s", args.run_name, subrun_id, field_index)
 
 
