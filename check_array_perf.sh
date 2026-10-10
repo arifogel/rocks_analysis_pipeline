@@ -137,4 +137,7 @@ secs=$(echo "$acct" | awk -F'|' '
     return d * 86400 + s
   }
   $1 == "COMPLETED" { printf "%d\n", secs($2) }' | sort -n)
-echo "completed tasks, elapsed seconds: min $(echo "$secs" | head -1)  median $(echo "$secs" | median)  max $(echo "$secs" | tail -1)"
+echo "$secs" | awk 'NF {a[++n] = $1; sum += $1} END {
+  if (!n) { print "no completed tasks"; exit }
+  printf "completed tasks (n=%d), elapsed: mean %.1f min  median %.1f  p10 %.1f  p90 %.1f  min %.1f  max %.1f\n", n, sum / n / 60,
+    a[int((n + 1) / 2)] / 60, a[int(n * 0.1) + 1] / 60, a[int(n * 0.9) + 1] / 60, a[1] / 60, a[n] / 60 }'
