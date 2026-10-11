@@ -14,7 +14,7 @@ py_library(
         "__init__.py",
         "api/__init__.py",
     ],
-    visibility = ["//rocks_analysis_pipeline/api/v1:__pkg__"],
+    visibility = ["//visibility:public"],
 )
 
 py_binary(
@@ -120,12 +120,14 @@ py_binary(
 py_library(
     name = "checkpoints_lib",
     srcs = ["checkpoints.py"],
+    visibility = ["//visibility:public"],
     deps = [":package_init_lib"],
 )
 
 py_library(
     name = "stage1_state_lib",
     srcs = ["stage1_state.py"],
+    visibility = ["//visibility:public"],
     deps = [":checkpoints_lib"],
 )
 
@@ -145,7 +147,25 @@ py_test(
 py_library(
     name = "proto_outputs_lib",
     srcs = ["proto_outputs.py"],
+    visibility = ["//visibility:public"],
     deps = [":stage1_state_lib"],
+)
+
+py_library(
+    name = "run_archive_lib",
+    srcs = ["run_archive.py"],
+    visibility = ["//visibility:public"],
+    deps = [":proto_outputs_lib"],
+)
+
+py_test(
+    name = "run_archive_test",
+    srcs = [":run_archive_test.py"],
+    main = ":run_archive_test.py",
+    deps = [
+        ":run_archive_lib",
+        ":stage2_merge_lib",
+    ],
 )
 
 py_library(
@@ -290,6 +310,7 @@ py_library(
     deps = [
         ":checkpoints_lib",
         ":proto_outputs_lib",
+        ":run_archive_lib",
         ":stage1_state_lib",
     ],
 )
