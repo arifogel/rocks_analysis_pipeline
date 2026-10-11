@@ -114,7 +114,7 @@ jobs:
     name: Bazel Build (almalinux-9)
     runs-on: ubuntu-latest
     container:
-      image: almalinux:9
+      image: almalinux:10
 
     steps:
       - name: Checkout repository
