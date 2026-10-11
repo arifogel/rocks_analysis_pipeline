@@ -113,6 +113,12 @@ def parse_args() -> argparse.Namespace:
     )
     arg("--merge-tlim", type=str, default="02:00:00", help="sbatch --time (HH:MM:SS) for each reduce job")
     arg("--merge-mem-gb", type=int, default=2, help="sbatch --mem (GB) for each reduce job")
+    arg(
+        "--exclude",
+        type=str,
+        default="",
+        help="comma-separated node names or ranges (sbatch --exclude) that no simulation+analysis or reduce job may run on",
+    )
 
     arg(
         "--chunk-size",
@@ -331,6 +337,7 @@ def submit_map_chunk(
         max_concurrent=args.max_concurrent,
         cpus_per_task=args.task_cpus,
         mem=args.task_mem_gb,
+        exclude=args.exclude,
     )
     return proc.stdout.strip()
 
@@ -370,6 +377,7 @@ def submit_reduce_chunk(
         log_path=log_path,
         mem=args.merge_mem_gb,
         dependency=f"afterok:{map_job_id}",
+        exclude=args.exclude,
     )
     return proc.stdout.strip()
 
