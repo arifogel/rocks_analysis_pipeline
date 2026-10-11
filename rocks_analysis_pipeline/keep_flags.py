@@ -1,33 +1,50 @@
 """The --keep-<x> flags, each keeping the output one deletion step would remove."""
 
 import argparse
+import dataclasses
 import enum
 from collections.abc import Set
 
 from rocks_analysis_pipeline.stage1_state import Step
 
 
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class _KeepFlagData:
+    step: Step
+    help: str
+
+
 class KeepFlag(enum.Enum):
     """A --keep-<x> flag. Passing it skips `step` and leaves what that step deletes in place."""
 
-    uncompressed_specsims_log = (
-        Step.uncompressed_specsims_log_deleted,
-        "don't delete the uncompressed specsims.log after compressing it",
+    uncompressed_specsims_log = _KeepFlagData(
+        step=Step.uncompressed_specsims_log_deleted,
+        help="don't delete the uncompressed specsims.log after compressing it",
     )
-    mc_truth = (Step.mc_truth_deleted, "don't delete bands.csv/dmtracks.csv after converting them to proto")
-    uncompressed_katydid_log = (
-        Step.uncompressed_katydid_log_deleted,
-        "don't delete the uncompressed katydid.log after compressing it",
+    mc_truth = _KeepFlagData(
+        step=Step.mc_truth_deleted,
+        help="don't delete bands.csv/dmtracks.csv after converting them to proto",
     )
-    specsims_output = (Step.specsims_output_deleted, "don't delete the .speck files after Katydid has consumed them")
-    katydid_output = (
-        Step.katydid_output_deleted,
-        "don't delete the .root/slew-times files after converting them to proto",
+    uncompressed_katydid_log = _KeepFlagData(
+        step=Step.uncompressed_katydid_log_deleted,
+        help="don't delete the uncompressed katydid.log after compressing it",
+    )
+    specsims_output = _KeepFlagData(
+        step=Step.specsims_output_deleted,
+        help="don't delete the .speck files after Katydid has consumed them",
+    )
+    katydid_output = _KeepFlagData(
+        step=Step.katydid_output_deleted,
+        help="don't delete the .root/slew-times files after converting them to proto",
     )
 
-    def __init__(self, step: Step, help: str) -> None:
-        self.step = step
-        self.help = help
+    @property
+    def step(self) -> Step:
+        return self.value.step
+
+    @property
+    def help(self) -> str:
+        return self.value.help
 
     @property
     def option(self) -> str:
