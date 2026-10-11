@@ -24,6 +24,7 @@ Example:
 
 import argparse
 import logging
+from collections.abc import Callable, Mapping, Set
 from pathlib import Path
 
 from rocks_analysis_pipeline import stage1_steps
@@ -38,7 +39,7 @@ logger = logging.getLogger(__name__)
 # skips (both the delete action itself and that step's checkpoint) when
 # passed to run_stage1_task's skip_steps. One entry per delete step in
 # Step; production steps are never skippable this way.
-KEEP_FLAG_STEPS: dict[str, Step] = {
+KEEP_FLAG_STEPS: Mapping[str, Step] = {
     "keep_uncompressed_specsims_log": Step.uncompressed_specsims_log_deleted,
     "keep_mc_truth": Step.mc_truth_deleted,
     "keep_uncompressed_katydid_log": Step.uncompressed_katydid_log_deleted,
@@ -197,7 +198,7 @@ def resolve_subrun_and_field(par: argparse.ArgumentParser, args: argparse.Namesp
     return args.job_id // args.num_fields, args.job_id % args.num_fields
 
 
-def compute_skip_steps(args: argparse.Namespace) -> frozenset[Step]:
+def compute_skip_steps(args: argparse.Namespace) -> Set[Step]:
     """Translates the parsed --keep-<x>/--keep-all flags into the set of
     step names to pass as run_stage1_task's skip_steps. Split out from
     main() so this translation is directly testable without going through
@@ -219,7 +220,7 @@ def resolve_noise_paths(args: argparse.Namespace) -> list[str]:
     return args.noise_paths
 
 
-def build_step_fns(args: argparse.Namespace, noise_paths: list[str]) -> dict:
+def build_step_fns(args: argparse.Namespace, noise_paths: list[str]) -> Mapping[Step, Callable[[Path], None]]:
     """Builds the real, complete step_fns dict for this run: everything
     from stage1_steps.STEP_FNS, with its two placeholders (specsims_done,
     katydid_done) replaced by real closures built from this run's

@@ -39,8 +39,8 @@ expected, is not.
 """
 
 import enum
+from collections.abc import Callable, Mapping, Set
 from pathlib import Path
-from typing import Callable
 
 from rocks_analysis_pipeline.checkpoints import is_checkpointed, run_checkpointed
 
@@ -139,8 +139,8 @@ def run_stage1_task(
     run_name: str,
     subrun_id: int,
     field_index: int,
-    step_fns: dict[Step, Callable[[Path], None]],
-    skip_steps: frozenset[Step] = frozenset(),
+    step_fns: Mapping[Step, Callable[[Path], None]],
+    skip_steps: Set[Step] = frozenset(),
     stop_after: Step | None = None,
 ) -> None:
     """Runs the steps in Step order for one task, resuming after whatever is already checkpointed.
