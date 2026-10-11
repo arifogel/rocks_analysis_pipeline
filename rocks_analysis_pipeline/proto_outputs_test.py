@@ -3,17 +3,13 @@
 import unittest
 
 from rocks_analysis_pipeline.proto_outputs import ProtoOutput
-from rocks_analysis_pipeline.stage1_state import Step
-from rocks_analysis_pipeline.stage1_steps import STEP_FNS
+from rocks_analysis_pipeline.stage1_steps import STATIC_STEP_FNS
 
 
 class ProtoOutputsTest(unittest.TestCase):
-    def test_every_output_step_has_a_function(self) -> None:
+    def test_every_output_step_is_a_static_step(self) -> None:
         for output in ProtoOutput:
-            self.assertIn(output.step, STEP_FNS)
-
-    def test_every_step_has_a_function(self) -> None:
-        self.assertEqual(set(STEP_FNS), set(Step))
+            self.assertIn(output.step, STATIC_STEP_FNS)
 
     def test_filenames_are_unique(self) -> None:
         self.assertEqual(len({output.filename for output in ProtoOutput}), len(ProtoOutput))

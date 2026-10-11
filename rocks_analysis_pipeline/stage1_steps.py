@@ -4,9 +4,8 @@ Each takes the task's task_dir as its only argument and returns None.
 specsims_done and katydid_done are the two exceptions: make_run_specsims and
 make_run_katydid are factories that build the real step closures, since
 those two steps need more than task_dir alone (the base yaml/json configs,
-the katydid config, noise paths). STEP_FNS below leaves those two as
-NotImplementedError placeholders for a caller to override with the real
-closures.
+the katydid config, noise paths). STATIC_STEP_FNS below holds every other
+step.
 
 Single source of truth for stage 1's on-disk file layout
 (SPECSIMS_CONFIG_FILENAME, ROOT_FILENAME, etc. below).
@@ -682,26 +681,13 @@ def delete_katydid_output(task_dir: Path) -> None:
     logger.info("katydid_output_deleted: track.root, slew_times.txt")
 
 
-def _not_implemented_without_factory(step: Step, factory_name: str):
-    def fn(task_dir: Path) -> None:
-        raise NotImplementedError(
-            f"stage1_steps.STEP_FNS[{step.name!r}] is a placeholder -- this step needs more than "
-            f"task_dir alone, so it's built via {factory_name}(...) and substituted in by the "
-            f"caller, not usable directly from this module-level dict."
-        )
-
-    return fn
-
-
-# Keys are the stage-1 step names, in the order they run.
-STEP_FNS = {
-    Step.specsims_done: _not_implemented_without_factory(Step.specsims_done, "make_run_specsims"),
+# The steps that need nothing beyond task_dir, in the order they run.
+STATIC_STEP_FNS = {
     Step.specsims_log_compressed: compress_specsims_log,
     Step.uncompressed_specsims_log_deleted: delete_uncompressed_specsims_log,
     Step.bands_proto_done: run_bands_proto_conversion,
     Step.dmtracks_proto_done: run_dmtracks_proto_conversion,
     Step.mc_truth_deleted: delete_mc_truth,
-    Step.katydid_done: _not_implemented_without_factory(Step.katydid_done, "make_run_katydid"),
     Step.katydid_log_compressed: compress_katydid_log,
     Step.uncompressed_katydid_log_deleted: delete_uncompressed_katydid_log,
     Step.specsims_output_deleted: delete_specsims_output,

@@ -267,6 +267,16 @@ py_library(
     ],
 )
 
+py_test(
+    name = "stage1_task_test",
+    srcs = [":stage1_task_test.py"],
+    main = ":stage1_task_test.py",
+    deps = [
+        ":stage1_state_lib",
+        ":stage1_task_lib",
+    ],
+)
+
 py_binary(
     name = "stage1_task",
     srcs = [":stage1_task.py"],

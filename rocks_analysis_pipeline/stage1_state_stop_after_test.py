@@ -63,6 +63,36 @@ class StopAfterTest(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
 
+class MissingStepFnsTest(unittest.TestCase):
+    def test_raises_before_running_when_a_needed_step_has_no_function(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            step_fns = {step: (lambda d: None) for step in Step if step != Step.katydid_done}
+            with self.assertRaisesRegex(ValueError, "katydid_done"):
+                run_stage1_task(runs_dir=Path(tmp), run_name="r", subrun_id=0, field_index=0, step_fns=step_fns)
+            self.assertFalse(any(Path(tmp).rglob(".checkpoint-*")))
+
+    def test_steps_after_stop_after_or_in_skip_steps_need_no_function(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            step_fns = {Step.specsims_done: lambda d: None}
+            run_stage1_task(
+                runs_dir=Path(tmp),
+                run_name="r",
+                subrun_id=0,
+                field_index=0,
+                step_fns=step_fns,
+                stop_after=Step.specsims_done,
+            )
+            step_fns = {step: (lambda d: None) for step in Step if step != Step.mc_truth_deleted}
+            run_stage1_task(
+                runs_dir=Path(tmp),
+                run_name="r2",
+                subrun_id=0,
+                field_index=0,
+                step_fns=step_fns,
+                skip_steps=frozenset({Step.mc_truth_deleted}),
+            )
+
+
 class LastStepTest(unittest.TestCase):
     def test_none_is_the_final_step(self) -> None:
         self.assertEqual(last_step(None), Step.katydid_output_deleted)

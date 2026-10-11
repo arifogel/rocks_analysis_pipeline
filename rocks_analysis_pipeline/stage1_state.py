@@ -159,8 +159,14 @@ def run_stage1_task(
         a skipped step is skipped again on every call.
       stop_after: the step after which to stop, or None to run through the last step. A step that
         is skipped or already checkpointed still counts as reached.
+
+    Raises:
+      ValueError: step_fns lacks a function for a step that would run.
     """
     last = last_step(stop_after)
+    missing = [step for step in Step if step <= last and step not in skip_steps and step not in step_fns]
+    if missing:
+        raise ValueError(f"step_fns has no function for {', '.join(map(str, missing))}")
     d = task_dir(runs_dir=runs_dir, run_name=run_name, subrun_id=subrun_id, field_index=field_index)
     d.mkdir(parents=True, exist_ok=True)
     for step in Step:

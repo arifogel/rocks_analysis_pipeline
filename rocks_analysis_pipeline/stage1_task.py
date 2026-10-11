@@ -169,26 +169,23 @@ def resolve_noise_paths(args: argparse.Namespace) -> list[str]:
 
 
 def build_step_fns(args: argparse.Namespace, noise_paths: list[str]) -> Mapping[Step, Callable[[Path], None]]:
-    """Builds the real, complete step_fns dict for this run: everything
-    from stage1_steps.STEP_FNS, with its two placeholders (specsims_done,
-    katydid_done) replaced by real closures built from this run's
-    CLI-provided config. Split out from main() for the same reason as
-    compute_skip_steps above. noise_paths is passed in already resolved by
-    resolve_noise_paths rather than recomputed here, so both closures below
-    share the exact same resolved value instead of each independently
-    re-resolving it, which for --noise-id would mean a second DB
-    round-trip that could in principle resolve differently.
+    """Returns the function for every step, built from this run's CLI-provided config.
+
+    Args:
+      args: parsed command-line arguments.
+      noise_paths: the resolved noise paths, shared by the specsims and Katydid steps.
     """
-    step_fns = dict(stage1_steps.STEP_FNS)
-    step_fns[Step.specsims_done] = stage1_steps.make_run_specsims(
-        yaml_config=args.yaml_config,
-        json_config=args.json_config,
-        initial_seed=args.initial_seed,
-        noise_paths=noise_paths,
-        use_ghcss=args.use_ghcss,
-    )
-    step_fns[Step.katydid_done] = stage1_steps.make_run_katydid(args.katydid_config, noise_paths)
-    return step_fns
+    return {
+        **stage1_steps.STATIC_STEP_FNS,
+        Step.specsims_done: stage1_steps.make_run_specsims(
+            yaml_config=args.yaml_config,
+            json_config=args.json_config,
+            initial_seed=args.initial_seed,
+            noise_paths=noise_paths,
+            use_ghcss=args.use_ghcss,
+        ),
+        Step.katydid_done: stage1_steps.make_run_katydid(args.katydid_config, noise_paths),
+    }
 
 
 def main() -> None:
