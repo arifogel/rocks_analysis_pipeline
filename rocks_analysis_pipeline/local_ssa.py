@@ -5,7 +5,8 @@ analysis) pipeline: fans out stage1_task across every (subrun_id,
 field_index) task for a run via a ThreadPoolExecutor, then, once every
 task has completed successfully, archives that run's bands/dmtracks/
 events/points into runs_dir/run_name/{bands,dmtracks,events,points}.tar
-by calling stage2_merge.run_stage2_merge directly in-process.
+by calling stage2_merge.run_stage2_merge directly in-process. With
+--stop-after, only the types whose step is at or before it are archived.
 
 Crash isolation comes from stage1_task running as a fresh subprocess, once
 per task, not from this orchestrator's worker being a separate process: a
@@ -64,9 +65,12 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
+from rocks_analysis_pipeline.keep_flags import add_keep_arguments, keep_options
 from rocks_analysis_pipeline.logging_setup import base_fmt, init_logging
-from rocks_analysis_pipeline.stage1_state import task_dir
+from rocks_analysis_pipeline.proto_outputs import ProtoOutput
+from rocks_analysis_pipeline.stage1_state import last_step, task_dir
 from rocks_analysis_pipeline.stage2_merge import run_stage2_merge
+from rocks_analysis_pipeline.stop_after_arg import add_stop_after_argument
 
 logger = logging.getLogger(__name__)
 
@@ -75,20 +79,6 @@ logger = logging.getLogger(__name__)
 # stage1_steps.SPECSIMS_LOG_FILENAME/KATYDID_LOG_FILENAME, which live
 # alongside it in the same task_dir.
 STAGE1_TASK_LOG_FILENAME = "stage1_task.log"
-
-# Maps each --keep-<x> flag on this CLI to the matching stage1_task flag
-# to pass through unchanged. Both sides use the identical flag name, so
-# this is a straight identity map, kept explicit as a table rather than
-# blind forwarding, so a flag added to one file doesn't silently start (or
-# stop) passing through without a matching, visible entry here.
-KEEP_FLAG_PASSTHROUGH: dict[str, str] = {
-    "keep_uncompressed_specsims_log": "--keep-uncompressed-specsims-log",
-    "keep_mc_truth": "--keep-mc-truth",
-    "keep_uncompressed_katydid_log": "--keep-uncompressed-katydid-log",
-    "keep_specsims_output": "--keep-specsims-output",
-    "keep_katydid_output": "--keep-katydid-output",
-    "keep_all": "--keep-all",
-}
 
 # Per-thread task label, injected into every log record via
 # _TaskContextFilter below.
@@ -162,14 +152,9 @@ def parse_args() -> argparse.Namespace:
         "through to every task's --log-override too.",
     )
 
-    # One flag per stage1_task.py --keep-<x> flag, passed straight through
-    # to every task -- see KEEP_FLAG_PASSTHROUGH above.
-    arg("--keep-uncompressed-specsims-log", dest="keep_uncompressed_specsims_log", action="store_true")
-    arg("--keep-mc-truth", dest="keep_mc_truth", action="store_true")
-    arg("--keep-uncompressed-katydid-log", dest="keep_uncompressed_katydid_log", action="store_true")
-    arg("--keep-specsims-output", dest="keep_specsims_output", action="store_true")
-    arg("--keep-katydid-output", dest="keep_katydid_output", action="store_true")
-    arg("--keep-all", dest="keep_all", action="store_true")
+    add_keep_arguments(par)
+
+    add_stop_after_argument(par)
 
     return par.parse_args()
 
@@ -225,9 +210,10 @@ def build_task_command(args: argparse.Namespace, job: dict[str, Any]) -> list[st
     if args.log_override:
         command.append(f"--log-override={args.log_override}")
 
-    for flag_dest, cli_flag in KEEP_FLAG_PASSTHROUGH.items():
-        if getattr(args, flag_dest):
-            command.append(cli_flag)
+    command.extend(keep_options(args))
+
+    if args.stop_after:
+        command.append(f"--stop-after={args.stop_after}")
 
     return command
 
@@ -302,8 +288,10 @@ def main() -> None:
 
     logger.info("All %d task(s) completed successfully.", len(jobs))
 
+    archive_types = {output for output in ProtoOutput if output.step <= last_step(args.stop_after)}
+
     logger.info("starting stage 2 merge")
-    run_stage2_merge(runs_dir=Path(args.runs_dir), run_name=args.run_name)
+    run_stage2_merge(runs_dir=Path(args.runs_dir), run_name=args.run_name, types=archive_types)
     logger.info("stage 2 merge complete")
 
 

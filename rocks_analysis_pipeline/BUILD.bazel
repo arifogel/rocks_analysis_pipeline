@@ -124,15 +124,48 @@ py_library(
 )
 
 py_library(
-    name = "stage2_types_lib",
-    srcs = ["stage2_types.py"],
-    deps = [":package_init_lib"],
-)
-
-py_library(
     name = "stage1_state_lib",
     srcs = ["stage1_state.py"],
     deps = [":checkpoints_lib"],
+)
+
+py_library(
+    name = "keep_flags_lib",
+    srcs = ["keep_flags.py"],
+    deps = [":stage1_state_lib"],
+)
+
+py_test(
+    name = "keep_flags_test",
+    srcs = [":keep_flags_test.py"],
+    main = ":keep_flags_test.py",
+    deps = [":keep_flags_lib"],
+)
+
+py_library(
+    name = "proto_outputs_lib",
+    srcs = ["proto_outputs.py"],
+    deps = [":stage1_state_lib"],
+)
+
+py_library(
+    name = "stop_after_arg_lib",
+    srcs = ["stop_after_arg.py"],
+    deps = [":stage1_state_lib"],
+)
+
+py_test(
+    name = "stage1_state_stop_after_test",
+    srcs = [":stage1_state_stop_after_test.py"],
+    main = ":stage1_state_stop_after_test.py",
+    deps = [":stage1_state_lib"],
+)
+
+py_test(
+    name = "stop_after_arg_test",
+    srcs = [":stop_after_arg_test.py"],
+    main = ":stop_after_arg_test.py",
+    deps = [":stop_after_arg_lib"],
 )
 
 py_library(
@@ -163,6 +196,7 @@ py_library(
     ]) + [
         ":logging_setup_lib",
         ":noise_paths_lib",
+        ":proto_outputs_lib",
         ":runfiles_resolve_lib",
         ":stage1_state_lib",
         "//rocks_analysis_pipeline/api/v1:band_py_pb2",
@@ -198,6 +232,16 @@ py_test(
 )
 
 py_test(
+    name = "proto_outputs_test",
+    srcs = [":proto_outputs_test.py"],
+    main = ":proto_outputs_test.py",
+    deps = [
+        ":proto_outputs_lib",
+        ":stage1_steps_lib",
+    ],
+)
+
+py_test(
     name = "render_katydid_config_test",
     srcs = [":render_katydid_config_test.py"],
     main = ":render_katydid_config_test.py",
@@ -215,9 +259,21 @@ py_library(
         "@katydid//release:katydid",
     ],
     deps = [
+        ":keep_flags_lib",
         ":noise_paths_lib",
         ":stage1_state_lib",
         ":stage1_steps_lib",
+        ":stop_after_arg_lib",
+    ],
+)
+
+py_test(
+    name = "stage1_task_test",
+    srcs = [":stage1_task_test.py"],
+    main = ":stage1_task_test.py",
+    deps = [
+        ":stage1_state_lib",
+        ":stage1_task_lib",
     ],
 )
 
@@ -233,8 +289,8 @@ py_library(
     srcs = ["stage2_merge.py"],
     deps = [
         ":checkpoints_lib",
-        ":stage1_steps_lib",
-        ":stage2_types_lib",
+        ":proto_outputs_lib",
+        ":stage1_state_lib",
     ],
 )
 
@@ -243,8 +299,8 @@ py_library(
     srcs = ["stage2_merge_task.py"],
     deps = [
         ":logging_setup_lib",
+        ":proto_outputs_lib",
         ":stage2_merge_lib",
-        ":stage2_types_lib",
     ],
 )
 
@@ -268,10 +324,13 @@ py_library(
         "@katydid//release:katydid",
     ],
     deps = [
+        ":keep_flags_lib",
         ":logging_setup_lib",
+        ":proto_outputs_lib",
         ":stage1_state_lib",
         ":stage1_task_lib",
         ":stage2_merge_lib",
+        ":stop_after_arg_lib",
         "@rules_python//python/runfiles",
     ],
 )
@@ -288,10 +347,13 @@ py_library(
     srcs = ["wulf_ssa.py"],
     data = ["//tools:run_via_warmed_runfiles.sh"],
     deps = [
+        ":keep_flags_lib",
         ":logging_setup_lib",
+        ":proto_outputs_lib",
         ":rocks_utility_lib",
+        ":stage1_state_lib",
         ":stage2_merge_task_lib",
-        ":stage2_types_lib",
+        ":stop_after_arg_lib",
         "@rules_python//python/runfiles",
     ],
 )

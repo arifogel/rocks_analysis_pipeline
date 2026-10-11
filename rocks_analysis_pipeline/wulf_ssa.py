@@ -26,7 +26,8 @@ allows (see --chunk-size's help for how to find that limit). Each task writes a 
 under runs_dir/run_name/subrun_*/field_*/, matching where a locally-run task would.
 Reduce: one single, non-array job per chunk and output type, submitted with
 --dependency=afterok:<that chunk's map array id> -- Slurm starts it once every task
-in that chunk has succeeded, and leaves it pending if any task fails. Resubmitting a
+in that chunk has succeeded, and leaves it pending if any task fails. With --stop-after,
+only the output types whose step is at or before it get a reduce job. Resubmitting a
 run is idempotent: map tasks resume from their checkpoints, and reduce jobs skip the
 outputs already archived. Every job's sbatch stdout/stderr capture (a fallback for
 whatever each doesn't already log itself, e.g. a crash before logging starts) goes
@@ -52,9 +53,12 @@ from pathlib import Path
 from typing import Any
 
 from python.runfiles import runfiles
+from rocks_analysis_pipeline.keep_flags import add_keep_arguments, keep_options
 from rocks_analysis_pipeline.logging_setup import init_logging
+from rocks_analysis_pipeline.proto_outputs import ProtoOutput
 from rocks_analysis_pipeline.rocks_utility import sbatch_job
-from rocks_analysis_pipeline.stage2_types import ARCHIVE_TYPES
+from rocks_analysis_pipeline.stage1_state import last_step
+from rocks_analysis_pipeline.stop_after_arg import add_stop_after_argument
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +123,7 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="nodes (sbatch --exclude syntax) that no submitted job may run on",
     )
+    add_stop_after_argument(par)
 
     arg(
         "--chunk-size",
@@ -142,12 +147,7 @@ def parse_args() -> argparse.Namespace:
         "through to both submitted jobs' --log-override too.",
     )
 
-    arg("--keep-uncompressed-specsims-log", dest="keep_uncompressed_specsims_log", action="store_true")
-    arg("--keep-mc-truth", dest="keep_mc_truth", action="store_true")
-    arg("--keep-uncompressed-katydid-log", dest="keep_uncompressed_katydid_log", action="store_true")
-    arg("--keep-specsims-output", dest="keep_specsims_output", action="store_true")
-    arg("--keep-katydid-output", dest="keep_katydid_output", action="store_true")
-    arg("--keep-all", dest="keep_all", action="store_true")
+    add_keep_arguments(par)
 
     return par.parse_args()
 
@@ -254,18 +254,10 @@ def build_map_command(
     if args.log_override:
         parts.append(shlex.quote(f"--log-override={args.log_override}"))
 
-    if args.keep_uncompressed_specsims_log:
-        parts.append("--keep-uncompressed-specsims-log")
-    if args.keep_mc_truth:
-        parts.append("--keep-mc-truth")
-    if args.keep_uncompressed_katydid_log:
-        parts.append("--keep-uncompressed-katydid-log")
-    if args.keep_specsims_output:
-        parts.append("--keep-specsims-output")
-    if args.keep_katydid_output:
-        parts.append("--keep-katydid-output")
-    if args.keep_all:
-        parts.append("--keep-all")
+    if args.stop_after:
+        parts.append(shlex.quote(f"--stop-after={args.stop_after}"))
+
+    parts.extend(keep_options(args))
 
     return " ".join(parts)
 
@@ -278,7 +270,7 @@ def build_reduce_command(
     num_fields: int,
     offset: int,
     chunk_size: int,
-    merge_type: str,
+    output: ProtoOutput,
 ) -> str:
     """Builds the shell command for one chunk's reduce job of one output type.
 
@@ -289,7 +281,7 @@ def build_reduce_command(
       num_fields: the number of fields per subrun.
       offset: the chunk's first job id.
       chunk_size: the number of tasks in the chunk.
-      merge_type: the output type the job archives.
+      output: the output the job archives.
 
     Returns:
       The command.
@@ -301,7 +293,7 @@ def build_reduce_command(
         "stage2_merge_task",
         shlex.quote(f"--runs-dir={args.runs_dir}"),
         shlex.quote(f"--run-name={args.run_name}"),
-        shlex.quote(f"--type={merge_type}"),
+        shlex.quote(f"--type={output}"),
         shlex.quote(f"--chunk-job-id-start={offset}"),
         shlex.quote(f"--chunk-job-id-end={offset + chunk_size - 1}"),
         shlex.quote(f"--chunk-num-fields={num_fields}"),
@@ -361,7 +353,7 @@ def submit_reduce_chunk(
     offset: int,
     chunk_size: int,
     map_job_id: str,
-    merge_type: str,
+    output: ProtoOutput,
 ) -> str:
     """Submits one chunk's reduce job of one output type.
 
@@ -376,14 +368,14 @@ def submit_reduce_chunk(
       offset: the chunk's first job id.
       chunk_size: the number of tasks in the chunk.
       map_job_id: the job id of the chunk's map array.
-      merge_type: the output type the job archives.
+      output: the output the job archives.
 
     Returns:
       The reduce job's Slurm job id.
     """
     slurm_log_dir = Path(args.runs_dir) / args.run_name / "slurm_logs"
     slurm_log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = slurm_log_dir / f"reduce_{merge_type}_chunk{chunk_index}_%j.log"
+    log_path = slurm_log_dir / f"reduce_{output}_chunk{chunk_index}_%j.log"
 
     cmd = build_reduce_command(
         launcher_path=launcher_path,
@@ -392,11 +384,11 @@ def submit_reduce_chunk(
         num_fields=num_fields,
         offset=offset,
         chunk_size=chunk_size,
-        merge_type=merge_type,
+        output=output,
     )
     proc = sbatch_job(
         cmd=cmd,
-        job_name=f"{args.run_name}_reduce_{merge_type}_chunk{chunk_index}",
+        job_name=f"{args.run_name}_reduce_{output}_chunk{chunk_index}",
         tlim=args.merge_tlim,
         log_path=log_path,
         mem=args.merge_mem_gb,
@@ -420,6 +412,8 @@ def main() -> None:
     num_chunks = len(chunks)
     logger.info("Split into %d chunk(s) of up to %d task(s) each (--chunk-size)", num_chunks, args.chunk_size)
 
+    outputs = [output for output in ProtoOutput if output.step <= last_step(args.stop_after)]
+
     if args.dry_run:
         for chunk_index, chunk in enumerate(chunks):
             logger.info(
@@ -435,11 +429,11 @@ def main() -> None:
                     job_id_offset=chunk.offset,
                 ),
             )
-            for merge_type in ARCHIVE_TYPES:
+            for output in outputs:
                 logger.info(
                     "[dry_run] chunk %d %s reduce command:\n%s",
                     chunk_index,
-                    merge_type,
+                    output,
                     build_reduce_command(
                         launcher_path=launcher_path,
                         runfiles_dir=runfiles_dir,
@@ -447,7 +441,7 @@ def main() -> None:
                         num_fields=num_fields,
                         offset=chunk.offset,
                         chunk_size=chunk.chunk_size,
-                        merge_type=merge_type,
+                        output=output,
                     ),
                 )
         return
@@ -464,7 +458,7 @@ def main() -> None:
         )
         logger.info("submitted map chunk %d: job %s (%d tasks)", chunk_index, map_job_id, chunk.chunk_size)
 
-        for merge_type in ARCHIVE_TYPES:
+        for output in outputs:
             reduce_job_id = submit_reduce_chunk(
                 launcher_path=launcher_path,
                 runfiles_dir=runfiles_dir,
@@ -474,11 +468,11 @@ def main() -> None:
                 offset=chunk.offset,
                 chunk_size=chunk.chunk_size,
                 map_job_id=map_job_id,
-                merge_type=merge_type,
+                output=output,
             )
             logger.info(
                 "submitted %s reduce chunk %d: job %s (runs after map chunk %d's job %s succeeds)",
-                merge_type,
+                output,
                 chunk_index,
                 reduce_job_id,
                 chunk_index,
