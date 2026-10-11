@@ -33,6 +33,7 @@ from pathlib import Path
 
 from rocks_analysis_pipeline.checkpoints import is_checkpointed, run_checkpointed
 from rocks_analysis_pipeline.proto_outputs import ProtoOutput
+from rocks_analysis_pipeline.run_archive import JobIds, archive_filename
 from rocks_analysis_pipeline.stage1_state import task_dir
 
 logger = logging.getLogger(__name__)
@@ -52,20 +53,9 @@ class ChunkScope:
     job_id_end: int  # inclusive
     num_fields: int
 
-
-def _archive_filename(output: ProtoOutput, chunk: ChunkScope | None) -> str:
-    """Names the archive for an output type.
-
-    Args:
-      output: the output type.
-      chunk: the chunk the archive covers, or None for the whole run.
-
-    Returns:
-      <name>.tar, or <name>_<job id start>-<job id end>.tar for a chunk.
-    """
-    if chunk is None:
-        return f"{output}.tar"
-    return f"{output}_{chunk.job_id_start}-{chunk.job_id_end}.tar"
+    @property
+    def job_ids(self) -> JobIds:
+        return JobIds(start=self.job_id_start, end=self.job_id_end)
 
 
 def _step_name(output: ProtoOutput, chunk: ChunkScope | None) -> str:
@@ -174,7 +164,7 @@ def run_stage2_merge(
     for step, output in steps:
 
         def archive(output=output) -> None:
-            path = run_dir / _archive_filename(output, chunk)
+            path = run_dir / archive_filename(output, job_ids=None if chunk is None else chunk.job_ids)
             _write_tar(run_dir=run_dir, task_dirs=task_dirs, filename=output.filename, path=path)
             logger.info("wrote %s: %d task(s) archived", path, len(task_dirs))
 
