@@ -2,7 +2,7 @@
 
 Applies to every comment, docstring, and prose doc in this repo (.bzl/BUILD comments, NOTES.md,
 PR descriptions, etc.), except where a rule says otherwise. README.md is exempt from the
-Bazel/C++ fluency assumption below (rule 4) but not from the others.
+Bazel fluency assumption below (rule 4) but not from the others.
 
 1. State current behavior only. Never PR/change history ("was fixed", "confirmed via",
    "originally", "used to"). Never negative framing ("not X", "isn't Y", "no longer") where a
@@ -21,7 +21,7 @@ Bazel/C++ fluency assumption below (rule 4) but not from the others.
    the sentence and start a new one, or drop the aside.
 
 4. In a Bazel file or Bazel-centric doc (NOTES.md included), assume the reader knows Bazel and
-   C++ build tooling. Don't explain what a rule/macro/repository_ctx/cc_import/etc. is, or
+   Python build tooling. Don't explain what a rule/macro/repository_ctx/py_binary/etc. is, or
    restate what code obviously does. Comment only non-obvious behavior, a real gotcha, or the
    reason for a choice that isn't the first one you'd guess. (README.md may need to explain more,
    since it may reach readers without that background.)
