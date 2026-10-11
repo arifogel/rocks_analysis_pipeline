@@ -29,7 +29,7 @@ import yaml
 
 from rocks_analysis_pipeline.api.v1 import band_pb2, dmtrack_pb2, event_pb2, point_pb2, slew_times_pb2, task_identity_pb2
 from rocks_analysis_pipeline.logging_setup import base_fmt
-from rocks_analysis_pipeline.proto_outputs import OUTPUT_BY_NAME
+from rocks_analysis_pipeline.proto_outputs import ProtoOutput
 from rocks_analysis_pipeline.runfiles_resolve import resolve_executable
 from rocks_analysis_pipeline.stage1_state import Step, parse_task_dir
 
@@ -171,7 +171,7 @@ def run_bands_proto_conversion(task_dir: Path) -> None:
         b.track = int(row.track)
         b.band = int(row.band)
 
-    _write_proto_zst(band_list, task_dir / OUTPUT_BY_NAME["bands"].filename)
+    _write_proto_zst(band_list, task_dir / ProtoOutput.bands.filename)
     logger.info("bands_proto_done: %d bands", len(band_list.bands))
 
 
@@ -191,7 +191,7 @@ def run_dmtracks_proto_conversion(task_dir: Path) -> None:
         for value, field in zip(row, dmtrack_pb2.DMTrack.DESCRIPTOR.fields):
             setattr(d, field.name, value)
 
-    _write_proto_zst(dmtrack_list, task_dir / OUTPUT_BY_NAME["dmtracks"].filename)
+    _write_proto_zst(dmtrack_list, task_dir / ProtoOutput.dmtracks.filename)
     logger.info("dmtracks_proto_done: %d dmtracks", len(dmtrack_list.dmtracks))
 
 
@@ -587,7 +587,7 @@ def run_events_proto_conversion(task_dir: Path) -> None:
         for field, values in flat_fields.items():
             setattr(e, field, values[i].item())
 
-    _write_proto_zst(event_list, task_dir / OUTPUT_BY_NAME["events"].filename)
+    _write_proto_zst(event_list, task_dir / ProtoOutput.events.filename)
     logger.info("events_proto_done: %d events", len(event_list.events))
 
 
@@ -653,7 +653,7 @@ def run_points_proto_conversion(task_dir: Path) -> None:
         for field, values in flat_fields.items():
             setattr(p, field, values[i].item())
 
-    _write_proto_zst(point_list, task_dir / OUTPUT_BY_NAME["points"].filename)
+    _write_proto_zst(point_list, task_dir / ProtoOutput.points.filename)
     logger.info("points_proto_done: %d points", len(point_list.points))
 
 

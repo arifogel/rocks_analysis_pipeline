@@ -20,7 +20,7 @@ import logging
 from pathlib import Path
 
 from rocks_analysis_pipeline.logging_setup import init_logging
-from rocks_analysis_pipeline.proto_outputs import ARCHIVE_TYPES
+from rocks_analysis_pipeline.proto_outputs import ProtoOutput
 from rocks_analysis_pipeline.stage2_merge import ChunkScope, run_stage2_merge
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ def parse_args() -> argparse.Namespace:
         "--type",
         dest="types",
         action="append",
-        choices=ARCHIVE_TYPES,
+        choices=[str(output) for output in ProtoOutput],
         default=None,
         help="output type to archive; repeatable (default: every type)",
     )
@@ -95,7 +95,7 @@ def main() -> None:
         else None
     )
     run_stage2_merge(
-        runs_dir=Path(args.runs_dir), run_name=args.run_name, chunk=chunk, types=args.types or ARCHIVE_TYPES
+        runs_dir=Path(args.runs_dir), run_name=args.run_name, chunk=chunk, types=frozenset(ProtoOutput[name] for name in args.types) if args.types else frozenset(ProtoOutput)
     )
 
 

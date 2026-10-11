@@ -1,23 +1,21 @@
-"""Per-task proto outputs: each output's type name, filename, and the stage-1 step that writes it."""
+"""Per-task proto outputs: each output's archive type, filename, and the stage-1 step that writes it."""
 
-import dataclasses
+import enum
 
 from rocks_analysis_pipeline.stage1_state import Step
 
 
-@dataclasses.dataclass(frozen=True, kw_only=True)
-class ProtoOutput:
-    name: str
-    filename: str
-    step: Step
+class ProtoOutput(enum.Enum):
+    """The per-task proto outputs. A member's name is its archive type."""
 
+    bands = ("bands.pb.zst", Step.bands_proto_done)
+    dmtracks = ("dmtracks.pb.zst", Step.dmtracks_proto_done)
+    events = ("events.pb.zst", Step.events_proto_done)
+    points = ("points.pb.zst", Step.points_proto_done)
 
-PROTO_OUTPUTS = (
-    ProtoOutput(name="bands", filename="bands.pb.zst", step=Step.bands_proto_done),
-    ProtoOutput(name="dmtracks", filename="dmtracks.pb.zst", step=Step.dmtracks_proto_done),
-    ProtoOutput(name="events", filename="events.pb.zst", step=Step.events_proto_done),
-    ProtoOutput(name="points", filename="points.pb.zst", step=Step.points_proto_done),
-)
+    def __init__(self, filename: str, step: Step) -> None:
+        self.filename = filename
+        self.step = step
 
-OUTPUT_BY_NAME = {output.name: output for output in PROTO_OUTPUTS}
-ARCHIVE_TYPES = tuple(OUTPUT_BY_NAME)
+    def __str__(self) -> str:
+        return self.name

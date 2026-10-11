@@ -27,12 +27,12 @@ Runs in-process.
 
 import logging
 import tarfile
-from collections.abc import Sequence
+from collections.abc import Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
 
 from rocks_analysis_pipeline.checkpoints import is_checkpointed, run_checkpointed
-from rocks_analysis_pipeline.proto_outputs import ARCHIVE_TYPES, OUTPUT_BY_NAME
+from rocks_analysis_pipeline.proto_outputs import ProtoOutput
 from rocks_analysis_pipeline.stage1_state import task_dir
 
 logger = logging.getLogger(__name__)
@@ -53,25 +53,25 @@ class ChunkScope:
     num_fields: int
 
 
-def _archive_filename(name: str, chunk: ChunkScope | None) -> str:
+def _archive_filename(output: ProtoOutput, chunk: ChunkScope | None) -> str:
     """Names the archive for an output type.
 
     Args:
-      name: the output type.
+      output: the output type.
       chunk: the chunk the archive covers, or None for the whole run.
 
     Returns:
       <name>.tar, or <name>_<job id start>-<job id end>.tar for a chunk.
     """
     if chunk is None:
-        return f"{name}.tar"
-    return f"{name}_{chunk.job_id_start}-{chunk.job_id_end}.tar"
+        return f"{output}.tar"
+    return f"{output}_{chunk.job_id_start}-{chunk.job_id_end}.tar"
 
 
-def _step_name(name: str, chunk: ChunkScope | None) -> str:
+def _step_name(output: ProtoOutput, chunk: ChunkScope | None) -> str:
     if chunk is None:
-        return f"merge-{name}"
-    return f"merge-{name}-{chunk.job_id_start}-{chunk.job_id_end}"
+        return f"merge-{output}"
+    return f"merge-{output}-{chunk.job_id_start}-{chunk.job_id_end}"
 
 
 def find_task_dirs(*, runs_dir: Path, run_name: str, chunk: ChunkScope | None = None) -> list[Path]:
@@ -143,13 +143,13 @@ def _write_tar(*, run_dir: Path, task_dirs: list[Path], filename: str, path: Pat
 
 
 def run_stage2_merge(
-    *, runs_dir: Path, run_name: str, chunk: ChunkScope | None = None, types: Sequence[str] = ARCHIVE_TYPES
+    *, runs_dir: Path, run_name: str, chunk: ChunkScope | None = None, types: Set[ProtoOutput] = frozenset(ProtoOutput)
 ) -> None:
     """Archives stage-1 output into per-type tars under runs_dir/run_name/.
 
     Each type is a checkpointed step, so a rerun skips the types already
-    archived. Raises ValueError for an unknown type, and RuntimeError if no
-    task directory exists or any lacks a requested type's file.
+    archived. Raises RuntimeError if no task directory exists or any lacks a
+    requested type's file.
 
     Args:
       runs_dir: base runs directory.
@@ -159,12 +159,9 @@ def run_stage2_merge(
         directory into <type>.tar.
       types: the output types to archive.
     """
-    unknown = sorted(set(types) - set(ARCHIVE_TYPES))
-    if unknown:
-        raise ValueError(f"unknown type(s) {unknown}; expected a subset of {list(ARCHIVE_TYPES)}")
     run_dir = runs_dir / run_name
-    steps = [(_step_name(name, chunk), name, OUTPUT_BY_NAME[name].filename) for name in ARCHIVE_TYPES if name in types]
-    if all(is_checkpointed(run_dir, step) for step, _, _ in steps):
+    steps = [(_step_name(output, chunk), output) for output in ProtoOutput if output in types]
+    if all(is_checkpointed(run_dir, step) for step, _ in steps):
         logger.info("stage2 merge: every requested output already archived under %s", run_dir)
         return
 
@@ -172,13 +169,13 @@ def run_stage2_merge(
     if not task_dirs:
         raise RuntimeError(f"No stage-1 task directories found under {run_dir}/subrun_*/field_*")
     logger.info("stage2 merge: found %d task dir(s) under %s", len(task_dirs), run_dir)
-    check_all_files_present(task_dirs, [filename for _, _, filename in steps])
+    check_all_files_present(task_dirs, [output.filename for _, output in steps])
 
-    for step, name, filename in steps:
+    for step, output in steps:
 
-        def archive(name=name, filename=filename) -> None:
-            path = run_dir / _archive_filename(name, chunk)
-            _write_tar(run_dir=run_dir, task_dirs=task_dirs, filename=filename, path=path)
+        def archive(output=output) -> None:
+            path = run_dir / _archive_filename(output, chunk)
+            _write_tar(run_dir=run_dir, task_dirs=task_dirs, filename=output.filename, path=path)
             logger.info("wrote %s: %d task(s) archived", path, len(task_dirs))
 
         run_checkpointed(task_dir=run_dir, step_name=step, fn=archive)

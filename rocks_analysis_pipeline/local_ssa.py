@@ -66,7 +66,7 @@ from pathlib import Path
 from typing import Any
 
 from rocks_analysis_pipeline.logging_setup import base_fmt, init_logging
-from rocks_analysis_pipeline.proto_outputs import PROTO_OUTPUTS
+from rocks_analysis_pipeline.proto_outputs import ProtoOutput
 from rocks_analysis_pipeline.stage1_state import last_step, task_dir
 from rocks_analysis_pipeline.stage2_merge import run_stage2_merge
 from rocks_analysis_pipeline.stop_after_arg import add_stop_after_argument
@@ -310,7 +310,7 @@ def main() -> None:
 
     logger.info("All %d task(s) completed successfully.", len(jobs))
 
-    archive_types = [output.name for output in PROTO_OUTPUTS if output.step <= last_step(args.stop_after)]
+    archive_types = {output for output in ProtoOutput if output.step <= last_step(args.stop_after)}
 
     logger.info("starting stage 2 merge")
     run_stage2_merge(runs_dir=Path(args.runs_dir), run_name=args.run_name, types=archive_types)
