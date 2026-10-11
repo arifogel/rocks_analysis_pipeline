@@ -53,6 +53,7 @@ from pathlib import Path
 from typing import Any
 
 from python.runfiles import runfiles
+from rocks_analysis_pipeline.keep_flags import add_keep_arguments, keep_options
 from rocks_analysis_pipeline.logging_setup import init_logging
 from rocks_analysis_pipeline.proto_outputs import ProtoOutput
 from rocks_analysis_pipeline.rocks_utility import sbatch_job
@@ -146,12 +147,7 @@ def parse_args() -> argparse.Namespace:
         "through to both submitted jobs' --log-override too.",
     )
 
-    arg("--keep-uncompressed-specsims-log", dest="keep_uncompressed_specsims_log", action="store_true")
-    arg("--keep-mc-truth", dest="keep_mc_truth", action="store_true")
-    arg("--keep-uncompressed-katydid-log", dest="keep_uncompressed_katydid_log", action="store_true")
-    arg("--keep-specsims-output", dest="keep_specsims_output", action="store_true")
-    arg("--keep-katydid-output", dest="keep_katydid_output", action="store_true")
-    arg("--keep-all", dest="keep_all", action="store_true")
+    add_keep_arguments(par)
 
     return par.parse_args()
 
@@ -261,18 +257,7 @@ def build_map_command(
     if args.stop_after:
         parts.append(shlex.quote(f"--stop-after={args.stop_after}"))
 
-    if args.keep_uncompressed_specsims_log:
-        parts.append("--keep-uncompressed-specsims-log")
-    if args.keep_mc_truth:
-        parts.append("--keep-mc-truth")
-    if args.keep_uncompressed_katydid_log:
-        parts.append("--keep-uncompressed-katydid-log")
-    if args.keep_specsims_output:
-        parts.append("--keep-specsims-output")
-    if args.keep_katydid_output:
-        parts.append("--keep-katydid-output")
-    if args.keep_all:
-        parts.append("--keep-all")
+    parts.extend(keep_options(args))
 
     return " ".join(parts)
 

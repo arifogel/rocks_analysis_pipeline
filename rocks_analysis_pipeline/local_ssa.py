@@ -65,6 +65,7 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
+from rocks_analysis_pipeline.keep_flags import add_keep_arguments, keep_options
 from rocks_analysis_pipeline.logging_setup import base_fmt, init_logging
 from rocks_analysis_pipeline.proto_outputs import ProtoOutput
 from rocks_analysis_pipeline.stage1_state import last_step, task_dir
@@ -78,20 +79,6 @@ logger = logging.getLogger(__name__)
 # stage1_steps.SPECSIMS_LOG_FILENAME/KATYDID_LOG_FILENAME, which live
 # alongside it in the same task_dir.
 STAGE1_TASK_LOG_FILENAME = "stage1_task.log"
-
-# Maps each --keep-<x> flag on this CLI to the matching stage1_task flag
-# to pass through unchanged. Both sides use the identical flag name, so
-# this is a straight identity map, kept explicit as a table rather than
-# blind forwarding, so a flag added to one file doesn't silently start (or
-# stop) passing through without a matching, visible entry here.
-KEEP_FLAG_PASSTHROUGH: dict[str, str] = {
-    "keep_uncompressed_specsims_log": "--keep-uncompressed-specsims-log",
-    "keep_mc_truth": "--keep-mc-truth",
-    "keep_uncompressed_katydid_log": "--keep-uncompressed-katydid-log",
-    "keep_specsims_output": "--keep-specsims-output",
-    "keep_katydid_output": "--keep-katydid-output",
-    "keep_all": "--keep-all",
-}
 
 # Per-thread task label, injected into every log record via
 # _TaskContextFilter below.
@@ -165,14 +152,7 @@ def parse_args() -> argparse.Namespace:
         "through to every task's --log-override too.",
     )
 
-    # One flag per stage1_task.py --keep-<x> flag, passed straight through
-    # to every task -- see KEEP_FLAG_PASSTHROUGH above.
-    arg("--keep-uncompressed-specsims-log", dest="keep_uncompressed_specsims_log", action="store_true")
-    arg("--keep-mc-truth", dest="keep_mc_truth", action="store_true")
-    arg("--keep-uncompressed-katydid-log", dest="keep_uncompressed_katydid_log", action="store_true")
-    arg("--keep-specsims-output", dest="keep_specsims_output", action="store_true")
-    arg("--keep-katydid-output", dest="keep_katydid_output", action="store_true")
-    arg("--keep-all", dest="keep_all", action="store_true")
+    add_keep_arguments(par)
 
     add_stop_after_argument(par)
 
@@ -230,9 +210,7 @@ def build_task_command(args: argparse.Namespace, job: dict[str, Any]) -> list[st
     if args.log_override:
         command.append(f"--log-override={args.log_override}")
 
-    for flag_dest, cli_flag in KEEP_FLAG_PASSTHROUGH.items():
-        if getattr(args, flag_dest):
-            command.append(cli_flag)
+    command.extend(keep_options(args))
 
     if args.stop_after:
         command.append(f"--stop-after={args.stop_after}")

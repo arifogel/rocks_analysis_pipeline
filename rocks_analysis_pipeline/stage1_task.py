@@ -28,6 +28,7 @@ from collections.abc import Callable, Mapping, Set
 from pathlib import Path
 
 from rocks_analysis_pipeline import stage1_steps
+from rocks_analysis_pipeline.keep_flags import add_keep_arguments, kept_flags
 from rocks_analysis_pipeline.logging_setup import init_logging
 from rocks_analysis_pipeline.noise_paths import resolve_noise_paths_from_id
 from rocks_analysis_pipeline.stage1_state import Step, run_stage1_task
@@ -35,17 +36,6 @@ from rocks_analysis_pipeline.stop_after_arg import add_stop_after_argument
 
 logger = logging.getLogger(__name__)
 
-# Maps each --keep-<x> flag's argparse dest to the one delete step it
-# skips (both the delete action itself and that step's checkpoint) when
-# passed to run_stage1_task's skip_steps. One entry per delete step in
-# Step; production steps are never skippable this way.
-KEEP_FLAG_STEPS: Mapping[str, Step] = {
-    "keep_uncompressed_specsims_log": Step.uncompressed_specsims_log_deleted,
-    "keep_mc_truth": Step.mc_truth_deleted,
-    "keep_uncompressed_katydid_log": Step.uncompressed_katydid_log_deleted,
-    "keep_specsims_output": Step.specsims_output_deleted,
-    "keep_katydid_output": Step.katydid_output_deleted,
-}
 
 
 def parse_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
@@ -136,43 +126,7 @@ def parse_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
         "logging_setup.apply_overrides",
     )
 
-    arg(
-        "--keep-uncompressed-specsims-log",
-        dest="keep_uncompressed_specsims_log",
-        action="store_true",
-        help="don't delete the uncompressed specsims.log after compressing it",
-    )
-    arg(
-        "--keep-uncompressed-katydid-log",
-        dest="keep_uncompressed_katydid_log",
-        action="store_true",
-        help="don't delete the uncompressed katydid.log after compressing it",
-    )
-    arg(
-        "--keep-mc-truth",
-        dest="keep_mc_truth",
-        action="store_true",
-        help="don't delete bands.csv/dmtracks.csv after converting them to proto",
-    )
-    arg(
-        "--keep-specsims-output",
-        dest="keep_specsims_output",
-        action="store_true",
-        help="don't delete the .speck files after Katydid has consumed them",
-    )
-    arg(
-        "--keep-katydid-output",
-        dest="keep_katydid_output",
-        action="store_true",
-        help="don't delete the .root/slew-times files after converting them to proto",
-    )
-    arg(
-        "--keep-all",
-        dest="keep_all",
-        action="store_true",
-        help="equivalent to passing every individual --keep-<x> flag above",
-    )
-
+    add_keep_arguments(par)
     add_stop_after_argument(par)
 
     return par, par.parse_args()
@@ -199,14 +153,8 @@ def resolve_subrun_and_field(par: argparse.ArgumentParser, args: argparse.Namesp
 
 
 def compute_skip_steps(args: argparse.Namespace) -> Set[Step]:
-    """Translates the parsed --keep-<x>/--keep-all flags into the set of
-    step names to pass as run_stage1_task's skip_steps. Split out from
-    main() so this translation is directly testable without going through
-    argparse/sys.argv.
-    """
-    if args.keep_all:
-        return frozenset(KEEP_FLAG_STEPS.values())
-    return frozenset(step for flag_dest, step in KEEP_FLAG_STEPS.items() if getattr(args, flag_dest))
+    """Returns the steps skipped by the parsed --keep-<x>/--keep-all flags."""
+    return frozenset(flag.step for flag in kept_flags(args))
 
 
 def resolve_noise_paths(args: argparse.Namespace) -> list[str]:

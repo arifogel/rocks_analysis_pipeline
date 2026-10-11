@@ -130,6 +130,19 @@ py_library(
 )
 
 py_library(
+    name = "keep_flags_lib",
+    srcs = ["keep_flags.py"],
+    deps = [":stage1_state_lib"],
+)
+
+py_test(
+    name = "keep_flags_test",
+    srcs = [":keep_flags_test.py"],
+    main = ":keep_flags_test.py",
+    deps = [":keep_flags_lib"],
+)
+
+py_library(
     name = "proto_outputs_lib",
     srcs = ["proto_outputs.py"],
     deps = [":stage1_state_lib"],
@@ -246,6 +259,7 @@ py_library(
         "@katydid//release:katydid",
     ],
     deps = [
+        ":keep_flags_lib",
         ":noise_paths_lib",
         ":stage1_state_lib",
         ":stage1_steps_lib",
@@ -300,6 +314,7 @@ py_library(
         "@katydid//release:katydid",
     ],
     deps = [
+        ":keep_flags_lib",
         ":logging_setup_lib",
         ":proto_outputs_lib",
         ":stage1_state_lib",
@@ -322,6 +337,7 @@ py_library(
     srcs = ["wulf_ssa.py"],
     data = ["//tools:run_via_warmed_runfiles.sh"],
     deps = [
+        ":keep_flags_lib",
         ":logging_setup_lib",
         ":proto_outputs_lib",
         ":rocks_utility_lib",
