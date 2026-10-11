@@ -5,8 +5,9 @@ running stage 2 against whatever stage-1 output already exists on disk,
 rather than only ever in-process right after a stage-1 run.
 
 The --chunk-* flags are all-or-nothing: given together, they scope the
-merge to one chunk's job id range and suffix its output filenames; omitted
-(the default), this merges every task directory the run has, unsuffixed.
+archive to one chunk's job id range and suffix its output filenames; omitted
+(the default), every task directory the run has is archived, unsuffixed.
+--type, repeatable, restricts the output types archived (default: all).
 
 Example:
     bazel run --@pypi//venv=dev //:stage2_merge_task -- \\
@@ -20,6 +21,7 @@ from pathlib import Path
 
 from rocks_analysis_pipeline.logging_setup import init_logging
 from rocks_analysis_pipeline.stage2_merge import ChunkScope, run_stage2_merge
+from rocks_analysis_pipeline.stage2_types import ARCHIVE_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +35,12 @@ def parse_args() -> argparse.Namespace:
     arg("--runs-dir", type=str, required=True, help="base runs directory")
     arg("--run-name", type=str, required=True, help="run name")
     arg(
-        "--allow-missing",
-        action="store_true",
-        help="merge whatever's actually there, skipping (with a warning) any task dir missing bands/dmtracks/"
-        "events/points .pb.zst -- default: refuse to write anything at all if anything is missing",
+        "--type",
+        dest="types",
+        action="append",
+        choices=ARCHIVE_TYPES,
+        default=None,
+        help="output type to archive; repeatable (default: every type)",
     )
 
     arg(
@@ -91,7 +95,7 @@ def main() -> None:
         else None
     )
     run_stage2_merge(
-        runs_dir=Path(args.runs_dir), run_name=args.run_name, allow_missing=args.allow_missing, chunk=chunk
+        runs_dir=Path(args.runs_dir), run_name=args.run_name, chunk=chunk, types=args.types or ARCHIVE_TYPES
     )
 
 

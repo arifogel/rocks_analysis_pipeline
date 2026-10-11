@@ -3,8 +3,8 @@
 Local, parallel orchestration driver for this project's ssa (spec-sims and
 analysis) pipeline: fans out stage1_task across every (subrun_id,
 field_index) task for a run via a ThreadPoolExecutor, then, once every
-task has completed successfully, merges that run's bands/dmtracks/
-events/points into runs_dir/run_name/{bands,dmtracks,events,points}.pb.zst
+task has completed successfully, archives that run's bands/dmtracks/
+events/points into runs_dir/run_name/{bands,dmtracks,events,points}.tar
 by calling stage2_merge.run_stage2_merge directly in-process.
 
 Crash isolation comes from stage1_task running as a fresh subprocess, once

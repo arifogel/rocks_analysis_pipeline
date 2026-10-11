@@ -115,6 +115,7 @@ def sbatch_job(
         run_in_apptainer = False,
         hold: bool = False,
         dependency: str = "",
+        exclude: str = "",
         ) -> sp.CompletedProcess:
 
     log_path = str(log_path)
@@ -134,6 +135,9 @@ def sbatch_job(
 
     if dependency:
         sbatch_cmd.append(f"--dependency={dependency}")
+
+    if exclude:
+        sbatch_cmd.append(f"--exclude={exclude}")
 
     if array:
         if isinstance(array, int):

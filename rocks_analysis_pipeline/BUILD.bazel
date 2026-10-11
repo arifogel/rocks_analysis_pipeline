@@ -124,6 +124,12 @@ py_library(
 )
 
 py_library(
+    name = "stage2_types_lib",
+    srcs = ["stage2_types.py"],
+    deps = [":package_init_lib"],
+)
+
+py_library(
     name = "stage1_state_lib",
     srcs = ["stage1_state.py"],
     deps = [":checkpoints_lib"],
@@ -226,12 +232,9 @@ py_library(
     name = "stage2_merge_lib",
     srcs = ["stage2_merge.py"],
     deps = [
+        ":checkpoints_lib",
         ":stage1_steps_lib",
-        "//rocks_analysis_pipeline/api/v1:band_py_pb2",
-        "//rocks_analysis_pipeline/api/v1:dmtrack_py_pb2",
-        "//rocks_analysis_pipeline/api/v1:event_py_pb2",
-        "//rocks_analysis_pipeline/api/v1:point_py_pb2",
-        "//rocks_analysis_pipeline/api/v1:v1_init_lib",
+        ":stage2_types_lib",
     ],
 )
 
@@ -241,6 +244,7 @@ py_library(
     deps = [
         ":logging_setup_lib",
         ":stage2_merge_lib",
+        ":stage2_types_lib",
     ],
 )
 
@@ -287,6 +291,7 @@ py_library(
         ":logging_setup_lib",
         ":rocks_utility_lib",
         ":stage2_merge_task_lib",
+        ":stage2_types_lib",
         "@rules_python//python/runfiles",
     ],
 )
