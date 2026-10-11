@@ -5,7 +5,7 @@ module(
 
 PYTHON_VERSION = "3.14"
 
-bazel_dep(name = "rules_python", version = "2.3.4")
+bazel_dep(name = "rules_python", version = "2.4.2")
 
 python = use_extension("@rules_python//python/extensions:python.bzl", "python")
 python.toolchain(
