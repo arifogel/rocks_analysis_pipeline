@@ -21,7 +21,7 @@ bazel_dep(name = "protobuf", version = "36.2")
 bazel_dep(name = "he6-cres-spec-sims", version = "0.2.0")
 git_override(
     module_name = "he6-cres-spec-sims",
-    commit = "dd7f264a631a327234cf200574fb1e593d8ecdcb",
+    commit = "72a29ac6ec624fce74889b438b992904c2c3e648",
     remote = "https://github.com/arifogel/he6-cres-spec-sims.git",
 )
 
