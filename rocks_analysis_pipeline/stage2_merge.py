@@ -32,14 +32,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from rocks_analysis_pipeline.checkpoints import is_checkpointed, run_checkpointed
+from rocks_analysis_pipeline.proto_outputs import ARCHIVE_TYPES, OUTPUT_BY_NAME
 from rocks_analysis_pipeline.stage1_state import task_dir
-from rocks_analysis_pipeline.stage1_steps import (
-    BANDS_PROTO_FILENAME,
-    DMTRACKS_PROTO_FILENAME,
-    EVENTS_PROTO_FILENAME,
-    POINTS_PROTO_FILENAME,
-)
-from rocks_analysis_pipeline.stage2_types import ARCHIVE_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -57,14 +51,6 @@ class ChunkScope:
     job_id_start: int  # inclusive
     job_id_end: int  # inclusive
     num_fields: int
-
-
-_FILENAME_BY_TYPE = {
-    "bands": BANDS_PROTO_FILENAME,
-    "dmtracks": DMTRACKS_PROTO_FILENAME,
-    "events": EVENTS_PROTO_FILENAME,
-    "points": POINTS_PROTO_FILENAME,
-}
 
 
 def _archive_filename(name: str, chunk: ChunkScope | None) -> str:
@@ -177,7 +163,7 @@ def run_stage2_merge(
     if unknown:
         raise ValueError(f"unknown type(s) {unknown}; expected a subset of {list(ARCHIVE_TYPES)}")
     run_dir = runs_dir / run_name
-    steps = [(_step_name(name, chunk), name, _FILENAME_BY_TYPE[name]) for name in ARCHIVE_TYPES if name in types]
+    steps = [(_step_name(name, chunk), name, OUTPUT_BY_NAME[name].filename) for name in ARCHIVE_TYPES if name in types]
     if all(is_checkpointed(run_dir, step) for step, _, _ in steps):
         logger.info("stage2 merge: every requested output already archived under %s", run_dir)
         return

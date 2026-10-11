@@ -26,7 +26,8 @@ allows (see --chunk-size's help for how to find that limit). Each task writes a 
 under runs_dir/run_name/subrun_*/field_*/, matching where a locally-run task would.
 Reduce: one single, non-array job per chunk and output type, submitted with
 --dependency=afterok:<that chunk's map array id> -- Slurm starts it once every task
-in that chunk has succeeded, and leaves it pending if any task fails. Resubmitting a
+in that chunk has succeeded, and leaves it pending if any task fails. With --stop-after,
+only the output types whose step is at or before it get a reduce job. Resubmitting a
 run is idempotent: map tasks resume from their checkpoints, and reduce jobs skip the
 outputs already archived. Every job's sbatch stdout/stderr capture (a fallback for
 whatever each doesn't already log itself, e.g. a crash before logging starts) goes
@@ -53,8 +54,9 @@ from typing import Any
 
 from python.runfiles import runfiles
 from rocks_analysis_pipeline.logging_setup import init_logging
+from rocks_analysis_pipeline.proto_outputs import partition_types
 from rocks_analysis_pipeline.rocks_utility import sbatch_job
-from rocks_analysis_pipeline.stage2_types import ARCHIVE_TYPES
+from rocks_analysis_pipeline.stop_after_arg import add_stop_after_argument
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +121,7 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="nodes (sbatch --exclude syntax) that no submitted job may run on",
     )
+    add_stop_after_argument(par)
 
     arg(
         "--chunk-size",
@@ -253,6 +256,9 @@ def build_map_command(
     parts.append(shlex.quote(f"--log-level={args.log_level}"))
     if args.log_override:
         parts.append(shlex.quote(f"--log-override={args.log_override}"))
+
+    if args.stop_after:
+        parts.append(shlex.quote(f"--stop-after={args.stop_after}"))
 
     if args.keep_uncompressed_specsims_log:
         parts.append("--keep-uncompressed-specsims-log")
@@ -420,6 +426,14 @@ def main() -> None:
     num_chunks = len(chunks)
     logger.info("Split into %d chunk(s) of up to %d task(s) each (--chunk-size)", num_chunks, args.chunk_size)
 
+    archive_types, withheld_types = partition_types(args.stop_after)
+    if withheld_types:
+        logger.info(
+            "not submitting %s reduce job(s): --stop-after %s precedes the step each needs",
+            ", ".join(withheld_types),
+            args.stop_after,
+        )
+
     if args.dry_run:
         for chunk_index, chunk in enumerate(chunks):
             logger.info(
@@ -435,7 +449,7 @@ def main() -> None:
                     job_id_offset=chunk.offset,
                 ),
             )
-            for merge_type in ARCHIVE_TYPES:
+            for merge_type in archive_types:
                 logger.info(
                     "[dry_run] chunk %d %s reduce command:\n%s",
                     chunk_index,
@@ -464,7 +478,7 @@ def main() -> None:
         )
         logger.info("submitted map chunk %d: job %s (%d tasks)", chunk_index, map_job_id, chunk.chunk_size)
 
-        for merge_type in ARCHIVE_TYPES:
+        for merge_type in archive_types:
             reduce_job_id = submit_reduce_chunk(
                 launcher_path=launcher_path,
                 runfiles_dir=runfiles_dir,

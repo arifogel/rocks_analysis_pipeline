@@ -37,6 +37,7 @@ from rocks_analysis_pipeline.stage1_state import (
     STEP_UNCOMPRESSED_SPECSIMS_LOG_DELETED,
     run_stage1_task,
 )
+from rocks_analysis_pipeline.stop_after_arg import add_stop_after_argument
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +179,8 @@ def parse_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
         help="equivalent to passing every individual --keep-<x> flag above",
     )
 
+    add_stop_after_argument(par)
+
     return par, par.parse_args()
 
 
@@ -270,6 +273,8 @@ def main() -> None:
     skip_steps = compute_skip_steps(args)
     if skip_steps:
         logger.info("skipping (--keep-*) steps: %s", sorted(skip_steps))
+    if args.stop_after:
+        logger.info("stopping after step %s (--stop-after)", args.stop_after)
 
     run_stage1_task(
         runs_dir=Path(args.runs_dir),
@@ -278,6 +283,7 @@ def main() -> None:
         field_index=field_index,
         step_fns=build_step_fns(args, noise_paths),
         skip_steps=skip_steps,
+        stop_after=args.stop_after,
     )
     logger.info("stage1_task complete: run_name=%s subrun_id=%s field_index=%s", args.run_name, subrun_id, field_index)
 

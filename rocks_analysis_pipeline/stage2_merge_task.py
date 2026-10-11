@@ -20,8 +20,8 @@ import logging
 from pathlib import Path
 
 from rocks_analysis_pipeline.logging_setup import init_logging
+from rocks_analysis_pipeline.proto_outputs import ARCHIVE_TYPES
 from rocks_analysis_pipeline.stage2_merge import ChunkScope, run_stage2_merge
-from rocks_analysis_pipeline.stage2_types import ARCHIVE_TYPES
 
 logger = logging.getLogger(__name__)
 

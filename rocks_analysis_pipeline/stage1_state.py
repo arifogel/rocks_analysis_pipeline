@@ -145,41 +145,34 @@ def run_stage1_task(
     field_index: int,
     step_fns: dict[str, Callable[[Path], None]],
     skip_steps: frozenset[str] = frozenset(),
+    stop_after: str | None = None,
 ) -> None:
-    """Runs every step in STEPS, in order, for this task, resuming correctly
-    from wherever a previous attempt left off, since run_checkpointed skips
-    any step whose marker already exists. This is the driver: it makes
-    each step (including cleanup steps) happen at its fixed point in the
-    sequence, every time this is called.
+    """Runs the steps in STEPS order for one task, resuming after whatever is already checkpointed.
 
-    Matches, precisely:
-        step = INITIAL_STEP
-        while step != DONE:
-            if not checkpointed(step) and not skipped(step):
-                do_step(step)
-                create_checkpoint(step)
-            step = next_step(step)
-
-    step_fns maps each entry in STEPS to the function that performs it
-    (taking this task's task_dir as its only argument) -- injected rather
-    than hardcoded here, since the real implementations (the actual
-    specsims/Katydid subprocess calls, the actual proto+zstd conversion)
-    depend on per-run configuration such as Katydid command-line wiring and
-    the proto schema. Each step function must produce its output safely
-    and resumably if rerun from a partial attempt: run_checkpointed guards
-    against re-running a step that's already fully done, not against a
+    Each step function must leave safe output if rerun from a partial attempt:
+    run_checkpointed guards against re-running a finished step, not against a
     step partially completing.
 
-    skip_steps names steps to treat as skipped(step) above: neither
-    step_fns[step] nor its checkpoint marker gets written, so a skipped
-    step is re-evaluated (and re-skipped) on every future call rather than
-    being permanently recorded as done. A kept step's delete action, and
-    only that action, never runs and never gets checkpointed, while every
-    other step proceeds normally.
+    Args:
+      runs_dir: base runs directory.
+      run_name: run name.
+      subrun_id: the task's subrun.
+      field_index: the task's field.
+      step_fns: maps each entry in STEPS to the function that performs it, given the task's task_dir.
+      skip_steps: steps to skip. Neither the step function nor its marker runs, so
+        a skipped step is skipped again on every call.
+      stop_after: the step after which to stop, or None to run through the last step. A step that
+        is skipped or already checkpointed still counts as reached.
     """
+    if stop_after is not None and stop_after not in STEPS:
+        raise ValueError(f"unknown step {stop_after!r}; expected one of {STEPS}")
     d = task_dir(runs_dir=runs_dir, run_name=run_name, subrun_id=subrun_id, field_index=field_index)
     d.mkdir(parents=True, exist_ok=True)
+    stop = False
     for step in STEPS:
+        if stop:
+            break
+        stop = step == stop_after
         if step in skip_steps:
             continue
         run_checkpointed(task_dir=d, step_name=step, fn=lambda step=step: step_fns[step](d))

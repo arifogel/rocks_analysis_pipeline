@@ -5,7 +5,8 @@ analysis) pipeline: fans out stage1_task across every (subrun_id,
 field_index) task for a run via a ThreadPoolExecutor, then, once every
 task has completed successfully, archives that run's bands/dmtracks/
 events/points into runs_dir/run_name/{bands,dmtracks,events,points}.tar
-by calling stage2_merge.run_stage2_merge directly in-process.
+by calling stage2_merge.run_stage2_merge directly in-process. With
+--stop-after, only the types whose step is at or before it are archived.
 
 Crash isolation comes from stage1_task running as a fresh subprocess, once
 per task, not from this orchestrator's worker being a separate process: a
@@ -65,8 +66,10 @@ from pathlib import Path
 from typing import Any
 
 from rocks_analysis_pipeline.logging_setup import base_fmt, init_logging
+from rocks_analysis_pipeline.proto_outputs import partition_types
 from rocks_analysis_pipeline.stage1_state import task_dir
 from rocks_analysis_pipeline.stage2_merge import run_stage2_merge
+from rocks_analysis_pipeline.stop_after_arg import add_stop_after_argument
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +174,8 @@ def parse_args() -> argparse.Namespace:
     arg("--keep-katydid-output", dest="keep_katydid_output", action="store_true")
     arg("--keep-all", dest="keep_all", action="store_true")
 
+    add_stop_after_argument(par)
+
     return par.parse_args()
 
 
@@ -228,6 +233,9 @@ def build_task_command(args: argparse.Namespace, job: dict[str, Any]) -> list[st
     for flag_dest, cli_flag in KEEP_FLAG_PASSTHROUGH.items():
         if getattr(args, flag_dest):
             command.append(cli_flag)
+
+    if args.stop_after:
+        command.append(f"--stop-after={args.stop_after}")
 
     return command
 
@@ -302,8 +310,14 @@ def main() -> None:
 
     logger.info("All %d task(s) completed successfully.", len(jobs))
 
+    archive_types, withheld_types = partition_types(args.stop_after)
+    if withheld_types:
+        logger.info(
+            "not archiving %s: --stop-after %s precedes the step each needs", ", ".join(withheld_types), args.stop_after
+        )
+
     logger.info("starting stage 2 merge")
-    run_stage2_merge(runs_dir=Path(args.runs_dir), run_name=args.run_name)
+    run_stage2_merge(runs_dir=Path(args.runs_dir), run_name=args.run_name, types=archive_types)
     logger.info("stage 2 merge complete")
 
 
