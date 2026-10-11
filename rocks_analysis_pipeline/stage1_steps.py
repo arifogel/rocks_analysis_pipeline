@@ -31,7 +31,7 @@ from rocks_analysis_pipeline.api.v1 import band_pb2, dmtrack_pb2, event_pb2, poi
 from rocks_analysis_pipeline.logging_setup import base_fmt
 from rocks_analysis_pipeline.proto_outputs import OUTPUT_BY_NAME
 from rocks_analysis_pipeline.runfiles_resolve import resolve_executable
-from rocks_analysis_pipeline.stage1_state import parse_task_dir
+from rocks_analysis_pipeline.stage1_state import Step, parse_task_dir
 
 logger = logging.getLogger(__name__)
 
@@ -682,10 +682,10 @@ def delete_katydid_output(task_dir: Path) -> None:
     logger.info("katydid_output_deleted: track.root, slew_times.txt")
 
 
-def _not_implemented_without_factory(step_name: str, factory_name: str):
+def _not_implemented_without_factory(step: Step, factory_name: str):
     def fn(task_dir: Path) -> None:
         raise NotImplementedError(
-            f"stage1_steps.STEP_FNS['{step_name}'] is a placeholder -- this step needs more than "
+            f"stage1_steps.STEP_FNS[{step.name!r}] is a placeholder -- this step needs more than "
             f"task_dir alone, so it's built via {factory_name}(...) and substituted in by the "
             f"caller, not usable directly from this module-level dict."
         )
@@ -695,18 +695,18 @@ def _not_implemented_without_factory(step_name: str, factory_name: str):
 
 # Keys are the stage-1 step names, in the order they run.
 STEP_FNS = {
-    "specsims_done": _not_implemented_without_factory("specsims_done", "make_run_specsims"),
-    "specsims_log_compressed": compress_specsims_log,
-    "uncompressed_specsims_log_deleted": delete_uncompressed_specsims_log,
-    "bands_proto_done": run_bands_proto_conversion,
-    "dmtracks_proto_done": run_dmtracks_proto_conversion,
-    "mc_truth_deleted": delete_mc_truth,
-    "katydid_done": _not_implemented_without_factory("katydid_done", "make_run_katydid"),
-    "katydid_log_compressed": compress_katydid_log,
-    "uncompressed_katydid_log_deleted": delete_uncompressed_katydid_log,
-    "specsims_output_deleted": delete_specsims_output,
-    "events_proto_done": run_events_proto_conversion,
-    "points_proto_done": run_points_proto_conversion,
-    "slew_proto_done": run_slew_proto_conversion,
-    "katydid_output_deleted": delete_katydid_output,
+    Step.specsims_done: _not_implemented_without_factory(Step.specsims_done, "make_run_specsims"),
+    Step.specsims_log_compressed: compress_specsims_log,
+    Step.uncompressed_specsims_log_deleted: delete_uncompressed_specsims_log,
+    Step.bands_proto_done: run_bands_proto_conversion,
+    Step.dmtracks_proto_done: run_dmtracks_proto_conversion,
+    Step.mc_truth_deleted: delete_mc_truth,
+    Step.katydid_done: _not_implemented_without_factory(Step.katydid_done, "make_run_katydid"),
+    Step.katydid_log_compressed: compress_katydid_log,
+    Step.uncompressed_katydid_log_deleted: delete_uncompressed_katydid_log,
+    Step.specsims_output_deleted: delete_specsims_output,
+    Step.events_proto_done: run_events_proto_conversion,
+    Step.points_proto_done: run_points_proto_conversion,
+    Step.slew_proto_done: run_slew_proto_conversion,
+    Step.katydid_output_deleted: delete_katydid_output,
 }

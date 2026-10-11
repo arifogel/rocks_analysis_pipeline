@@ -54,8 +54,9 @@ from typing import Any
 
 from python.runfiles import runfiles
 from rocks_analysis_pipeline.logging_setup import init_logging
-from rocks_analysis_pipeline.proto_outputs import partition_types
+from rocks_analysis_pipeline.proto_outputs import PROTO_OUTPUTS
 from rocks_analysis_pipeline.rocks_utility import sbatch_job
+from rocks_analysis_pipeline.stage1_state import last_step
 from rocks_analysis_pipeline.stop_after_arg import add_stop_after_argument
 
 logger = logging.getLogger(__name__)
@@ -426,13 +427,7 @@ def main() -> None:
     num_chunks = len(chunks)
     logger.info("Split into %d chunk(s) of up to %d task(s) each (--chunk-size)", num_chunks, args.chunk_size)
 
-    archive_types, withheld_types = partition_types(args.stop_after)
-    if withheld_types:
-        logger.info(
-            "not submitting %s reduce job(s): --stop-after %s precedes the step each needs",
-            ", ".join(withheld_types),
-            args.stop_after,
-        )
+    archive_types = [output.name for output in PROTO_OUTPUTS if output.step <= last_step(args.stop_after)]
 
     if args.dry_run:
         for chunk_index, chunk in enumerate(chunks):

@@ -325,6 +325,7 @@ py_library(
         ":logging_setup_lib",
         ":proto_outputs_lib",
         ":rocks_utility_lib",
+        ":stage1_state_lib",
         ":stage2_merge_task_lib",
         ":stop_after_arg_lib",
         "@rules_python//python/runfiles",

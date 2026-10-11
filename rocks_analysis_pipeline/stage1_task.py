@@ -29,14 +29,7 @@ from pathlib import Path
 from rocks_analysis_pipeline import stage1_steps
 from rocks_analysis_pipeline.logging_setup import init_logging
 from rocks_analysis_pipeline.noise_paths import resolve_noise_paths_from_id
-from rocks_analysis_pipeline.stage1_state import (
-    STEP_KATYDID_OUTPUT_DELETED,
-    STEP_MC_TRUTH_DELETED,
-    STEP_SPECSIMS_OUTPUT_DELETED,
-    STEP_UNCOMPRESSED_KATYDID_LOG_DELETED,
-    STEP_UNCOMPRESSED_SPECSIMS_LOG_DELETED,
-    run_stage1_task,
-)
+from rocks_analysis_pipeline.stage1_state import Step, run_stage1_task
 from rocks_analysis_pipeline.stop_after_arg import add_stop_after_argument
 
 logger = logging.getLogger(__name__)
@@ -44,13 +37,13 @@ logger = logging.getLogger(__name__)
 # Maps each --keep-<x> flag's argparse dest to the one delete step it
 # skips (both the delete action itself and that step's checkpoint) when
 # passed to run_stage1_task's skip_steps. One entry per delete step in
-# STEPS; production steps are never skippable this way.
-KEEP_FLAG_STEPS: dict[str, str] = {
-    "keep_uncompressed_specsims_log": STEP_UNCOMPRESSED_SPECSIMS_LOG_DELETED,
-    "keep_mc_truth": STEP_MC_TRUTH_DELETED,
-    "keep_uncompressed_katydid_log": STEP_UNCOMPRESSED_KATYDID_LOG_DELETED,
-    "keep_specsims_output": STEP_SPECSIMS_OUTPUT_DELETED,
-    "keep_katydid_output": STEP_KATYDID_OUTPUT_DELETED,
+# Step; production steps are never skippable this way.
+KEEP_FLAG_STEPS: dict[str, Step] = {
+    "keep_uncompressed_specsims_log": Step.uncompressed_specsims_log_deleted,
+    "keep_mc_truth": Step.mc_truth_deleted,
+    "keep_uncompressed_katydid_log": Step.uncompressed_katydid_log_deleted,
+    "keep_specsims_output": Step.specsims_output_deleted,
+    "keep_katydid_output": Step.katydid_output_deleted,
 }
 
 
@@ -204,7 +197,7 @@ def resolve_subrun_and_field(par: argparse.ArgumentParser, args: argparse.Namesp
     return args.job_id // args.num_fields, args.job_id % args.num_fields
 
 
-def compute_skip_steps(args: argparse.Namespace) -> frozenset[str]:
+def compute_skip_steps(args: argparse.Namespace) -> frozenset[Step]:
     """Translates the parsed --keep-<x>/--keep-all flags into the set of
     step names to pass as run_stage1_task's skip_steps. Split out from
     main() so this translation is directly testable without going through
@@ -238,14 +231,14 @@ def build_step_fns(args: argparse.Namespace, noise_paths: list[str]) -> dict:
     round-trip that could in principle resolve differently.
     """
     step_fns = dict(stage1_steps.STEP_FNS)
-    step_fns["specsims_done"] = stage1_steps.make_run_specsims(
+    step_fns[Step.specsims_done] = stage1_steps.make_run_specsims(
         yaml_config=args.yaml_config,
         json_config=args.json_config,
         initial_seed=args.initial_seed,
         noise_paths=noise_paths,
         use_ghcss=args.use_ghcss,
     )
-    step_fns["katydid_done"] = stage1_steps.make_run_katydid(args.katydid_config, noise_paths)
+    step_fns[Step.katydid_done] = stage1_steps.make_run_katydid(args.katydid_config, noise_paths)
     return step_fns
 
 
@@ -272,7 +265,7 @@ def main() -> None:
 
     skip_steps = compute_skip_steps(args)
     if skip_steps:
-        logger.info("skipping (--keep-*) steps: %s", sorted(skip_steps))
+        logger.info("skipping (--keep-*) steps: %s", [str(step) for step in sorted(skip_steps)])
     if args.stop_after:
         logger.info("stopping after step %s (--stop-after)", args.stop_after)
 
