@@ -2,36 +2,27 @@
 runs_dir/run_name/{bands,dmtracks,events,points}.tar, sibling to that run's
 subrun_*/ directories.
 
-Each tar holds one stage-1 file per task, byte for byte, as
-subrun_<id>/field_<index>/<filename>. Every member keeps the TaskIdentity
-inside its own BandList/DMTrackList/EventList/PointList, so no per-task
-identity is lost. A reader streams the tar one member at a time.
+Each tar holds one stage-1 file per task, copied byte for byte, as
+subrun_<id>/field_<index>/<filename>. Every member is a complete
+BandList/DMTrackList/EventList/PointList carrying its own TaskIdentity.
 
-run_stage2_merge's chunk=None default archives every task directory the run
-has into one unsuffixed set of those four files. Passing a ChunkScope
-instead archives only that chunk's task directories, into filenames with
-_<job id start>-<job id end> inserted before the extension. Memory use is
-one copy buffer, whatever the chunk size.
+run_stage2_merge archives every task directory the run has into one
+unsuffixed set of tars. Passing a ChunkScope archives only that chunk's task
+directories, into filenames with _<job id start>-<job id end> inserted
+before the extension. Passing types archives only those types. Memory use
+is constant in the number of tasks.
 
-slew_times is not archived here: identical across every task of a run (same
-DAQ config, same simulated acquisition timing), and not consumed
-downstream.
+slew_times is excluded: identical across every task of a run (same DAQ
+config, same simulated acquisition timing).
 
 Strict: if any task directory is missing a requested type's .pb.zst,
 run_stage2_merge raises before writing anything.
 
-run_stage2_merge archives all four types by default, or only the types it
-is given, so each type can run as its own job.
-
-Each of the four archives is a checkpointed step in runs_dir/run_name/
+Each type's archive is a checkpointed step in runs_dir/run_name/
 (.checkpoint-merge-<type>, with -<job id start>-<job id end> appended for a
-chunk). Rerunning skips the steps already done and returns at once when all
-four are.
+chunk). Rerunning skips the types already archived.
 
-Runs in-process, not as a subprocess, since a pure copy step needs no crash
-isolation. Also has a thin CLI driver (stage2_merge_task.py) for running
-stage 2 as a separate step against whatever stage-1 output already exists
-on disk.
+Runs in-process.
 """
 
 import logging
@@ -68,7 +59,6 @@ class ChunkScope:
     num_fields: int
 
 
-# Stage-1 filename for each archived type.
 _FILENAME_BY_TYPE = {
     "bands": BANDS_PROTO_FILENAME,
     "dmtracks": DMTRACKS_PROTO_FILENAME,
@@ -78,8 +68,14 @@ _FILENAME_BY_TYPE = {
 
 
 def _archive_filename(name: str, chunk: ChunkScope | None) -> str:
-    """The output filename for type name: <name>.tar, or
-    <name>_<job id start>-<job id end>.tar for a chunk.
+    """Names the archive for an output type.
+
+    Args:
+      name: the output type.
+      chunk: the chunk the archive covers, or None for the whole run.
+
+    Returns:
+      <name>.tar, or <name>_<job id start>-<job id end>.tar for a chunk.
     """
     if chunk is None:
         return f"{name}.tar"
@@ -93,22 +89,20 @@ def _step_name(name: str, chunk: ChunkScope | None) -> str:
 
 
 def find_task_dirs(*, runs_dir: Path, run_name: str, chunk: ChunkScope | None = None) -> list[Path]:
-    """Every stage-1 task directory for this run (chunk=None), or just the
-    task directories for one chunk's job id range (chunk=<a ChunkScope>).
+    """Returns a run's stage-1 task directories.
 
-    chunk=None matches task_dir's path convention
-    (runs_dir/run_name/subrun_<id>/field_<index>), discovered by globbing
-    rather than computed from an expected count, so this archives whatever
-    stage 1 actually produced and runs standalone against partial or
-    already-cleaned-up runs.
+    With chunk=None, the sorted directories on disk matching
+    runs_dir/run_name/subrun_<id>/field_<index>. With a chunk, one directory
+    per job id in its range, derived as (subrun_id, field_index) =
+    divmod(job_id, num_fields) whether or not the directory exists.
 
-    chunk=<a ChunkScope> instead computes the chunk's task dirs directly
-    from its job id range (subrun_id, field_index = divmod(job_id,
-    num_fields)): the expected set is already known exactly, so no glob is
-    needed. A task dir that doesn't exist on disk is still returned:
-    check_all_files_present treats every one of its (necessarily absent)
-    files as missing, the same as a directory that exists but is
-    incomplete.
+    Args:
+      runs_dir: base runs directory.
+      run_name: run name.
+      chunk: the job id range to restrict to, or None for every directory on disk.
+
+    Returns:
+      The task directories.
     """
     if chunk is None:
         return sorted((runs_dir / run_name).glob("subrun_*/field_*"))
@@ -124,8 +118,11 @@ def find_task_dirs(*, runs_dir: Path, run_name: str, chunk: ChunkScope | None = 
 
 
 def check_all_files_present(task_dirs: list[Path], filenames: Sequence[str]) -> None:
-    """Raises if any task directory is missing any of filenames. Called
-    once, upfront, before any archiving starts.
+    """Raises RuntimeError if any task directory lacks any of filenames.
+
+    Args:
+      task_dirs: the task directories to check.
+      filenames: the files each directory must hold.
     """
     missing: dict[Path, list[str]] = {}
     for d in task_dirs:
@@ -136,13 +133,18 @@ def check_all_files_present(task_dirs: list[Path], filenames: Sequence[str]) -> 
         details = "; ".join(f"{d}: missing {', '.join(files)}" for d, files in missing.items())
         raise RuntimeError(
             f"{len(missing)} of {len(task_dirs)} task dir(s) are missing expected stage-1 output -- "
-            f"refusing to merge: {details}"
+            f"refusing to archive: {details}"
         )
 
 
 def _write_tar(*, run_dir: Path, task_dirs: list[Path], filename: str, path: Path) -> None:
-    """Writes path as a tar of filename from every task directory, in the
-    order given, each member named by its path relative to run_dir.
+    """Writes a tar holding filename from each task directory.
+
+    Args:
+      run_dir: the directory each member's name is relative to.
+      task_dirs: the directories to take filename from, archived in this order.
+      filename: the file to archive from each directory.
+      path: the tar to write.
     """
     with tarfile.open(path, "w") as tar:
         for d in task_dirs:
@@ -157,14 +159,19 @@ def _write_tar(*, run_dir: Path, task_dirs: list[Path], filename: str, path: Pat
 def run_stage2_merge(
     *, runs_dir: Path, run_name: str, chunk: ChunkScope | None = None, types: Sequence[str] = ARCHIVE_TYPES
 ) -> None:
-    """The actual stage-2 step: archives each of types (every type in
-    ARCHIVE_TYPES by default) into runs_dir/run_name/<type>.tar, sibling to
-    that run's subrun_*/ directories. With chunk given, archives only that
-    chunk's task directories into <type>_<job id start>-<job id end>.tar.
+    """Archives stage-1 output into per-type tars under runs_dir/run_name/.
 
-    Each type is a checkpointed step in runs_dir/run_name/, so a rerun
-    skips the types already archived. Raises if types names an unknown
-    type, or if any task directory is missing a requested type's file.
+    Each type is a checkpointed step, so a rerun skips the types already
+    archived. Raises ValueError for an unknown type, and RuntimeError if no
+    task directory exists or any lacks a requested type's file.
+
+    Args:
+      runs_dir: base runs directory.
+      run_name: run name.
+      chunk: archives only this chunk's task directories into
+        <type>_<job id start>-<job id end>.tar; None archives every task
+        directory into <type>.tar.
+      types: the output types to archive.
     """
     unknown = sorted(set(types) - set(ARCHIVE_TYPES))
     if unknown:

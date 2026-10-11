@@ -28,7 +28,7 @@ Reduce: one single, non-array job per chunk and output type, submitted with
 --dependency=afterok:<that chunk's map array id> -- Slurm starts it once every task
 in that chunk has succeeded, and leaves it pending if any task fails. Resubmitting a
 run is idempotent: map tasks resume from their checkpoints, and reduce jobs skip the
-outputs already merged. Every job's sbatch stdout/stderr capture (a fallback for
+outputs already archived. Every job's sbatch stdout/stderr capture (a fallback for
 whatever each doesn't already log itself, e.g. a crash before logging starts) goes
 under runs_dir/run_name/slurm_logs/.
 
@@ -117,7 +117,7 @@ def parse_args() -> argparse.Namespace:
         "--exclude",
         type=str,
         default="",
-        help="comma-separated node names or ranges (sbatch --exclude) that no simulation+analysis or reduce job may run on",
+        help="nodes (sbatch --exclude syntax) that no submitted job may run on",
     )
 
     arg(
@@ -130,7 +130,6 @@ def parse_args() -> argparse.Namespace:
         "chunk's map tasks are submitted as a single array job; default is comfortably under "
         "Slurm's stock 1001 default -- lower this if this cluster's MaxArraySize is smaller.",
     )
-
 
     arg("--dry-run", action="store_true", help="print the map/reduce commands that would be submitted, without calling sbatch")
 
@@ -281,9 +280,19 @@ def build_reduce_command(
     chunk_size: int,
     merge_type: str,
 ) -> str:
-    """Builds the shell command one chunk's reduce job for merge_type runs --
-    the --chunk-* flags scope it to this chunk's inclusive job id range and
-    filename suffix.
+    """Builds the shell command for one chunk's reduce job of one output type.
+
+    Args:
+      launcher_path: the release launcher.
+      runfiles_dir: the RUNFILES_DIR the command runs with.
+      args: the parsed wulf_ssa arguments.
+      num_fields: the number of fields per subrun.
+      offset: the chunk's first job id.
+      chunk_size: the number of tasks in the chunk.
+      merge_type: the output type the job archives.
+
+    Returns:
+      The command.
     """
     parts = [
         f"RUNFILES_DIR={shlex.quote(runfiles_dir)}",
@@ -354,8 +363,23 @@ def submit_reduce_chunk(
     map_job_id: str,
     merge_type: str,
 ) -> str:
-    """Submits one chunk's reduce job for merge_type, with --dependency=afterok:<that chunk's
-    map job id>.
+    """Submits one chunk's reduce job of one output type.
+
+    The job starts once every task of the chunk's map array has succeeded.
+
+    Args:
+      launcher_path: the release launcher.
+      runfiles_dir: the RUNFILES_DIR the job runs with.
+      args: the parsed wulf_ssa arguments.
+      num_fields: the number of fields per subrun.
+      chunk_index: the chunk's index, used in the job name and log path.
+      offset: the chunk's first job id.
+      chunk_size: the number of tasks in the chunk.
+      map_job_id: the job id of the chunk's map array.
+      merge_type: the output type the job archives.
+
+    Returns:
+      The reduce job's Slurm job id.
     """
     slurm_log_dir = Path(args.runs_dir) / args.run_name / "slurm_logs"
     slurm_log_dir.mkdir(parents=True, exist_ok=True)

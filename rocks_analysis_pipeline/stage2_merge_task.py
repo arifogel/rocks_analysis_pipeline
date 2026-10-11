@@ -5,8 +5,9 @@ running stage 2 against whatever stage-1 output already exists on disk,
 rather than only ever in-process right after a stage-1 run.
 
 The --chunk-* flags are all-or-nothing: given together, they scope the
-merge to one chunk's job id range and suffix its output filenames; omitted
-(the default), this merges every task directory the run has, unsuffixed.
+archive to one chunk's job id range and suffix its output filenames; omitted
+(the default), every task directory the run has is archived, unsuffixed.
+--type, repeatable, restricts the output types archived (default: all).
 
 Example:
     bazel run --@pypi//venv=dev //:stage2_merge_task -- \\
@@ -39,7 +40,7 @@ def parse_args() -> argparse.Namespace:
         action="append",
         choices=ARCHIVE_TYPES,
         default=None,
-        help="Output type to archive; repeatable. Default: every type.",
+        help="output type to archive; repeatable (default: every type)",
     )
 
     arg(

@@ -1,3 +1,3 @@
-"""The output types stage 2 archives. Each type has its own reduce job."""
+"""The output types stage 2 archives."""
 
 ARCHIVE_TYPES = ("bands", "dmtracks", "events", "points")
